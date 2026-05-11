@@ -20,6 +20,7 @@ import docx
 import PyPDF2
 from pyrogram import Client
 import asyncio
+from vision_ocr import recognize_image_file
 
 # ====== Error helpers: код -> расшифровка и запись в файл ======
 import traceback
@@ -504,33 +505,28 @@ with open(ocr_txt, "w", encoding="utf-8") as output, open(combined_txt, "w", enc
     for idx, file in enumerate(sorted(os.listdir(frames_dir))):
         if file.endswith(".jpg"):
             path = os.path.join(frames_dir, file)
-            with open(path, "rb") as img:
-                encoded = base64.b64encode(img.read()).decode("utf-8")
-            payload = {
-                "folderId": yandex_folder_id,
-                "analyze_specs": [{
-                    "content": encoded,
-                    "features": [{"type": "TEXT_DETECTION", "textDetectionConfig": {"languageCodes": ["*"]}}]
-                }]
-            }
-            headers = {"Authorization": f"Api-Key {yandex_api_key}"}
-            response = requests.post("https://vision.api.cloud.yandex.net/vision/v1/batchAnalyze", headers=headers, json=payload)
-            try:
-                result = response.json()
-                all_results[file] = result
-                blocks = result["results"][0]["results"][0]["textDetection"]["pages"][0]["blocks"]
-                texts = []
-                for block in blocks:
-                    for line in block.get("lines", []):
-                        line_text = " ".join(word["text"] for word in line.get("words", []))
-                        texts.append(line_text)
-                frame_text = "\n".join(texts).strip()
+            result = recognize_image_file(
+                path,
+                api_key=yandex_api_key,
+                folder_id=yandex_folder_id,
+                attempts=int(os.getenv("YANDEX_VISION_RETRIES", "3")),
+                timeout=int(os.getenv("YANDEX_VISION_TIMEOUT", "90")),
+            )
+            all_results[file] = result.raw
+            if result.ok:
+                frame_text = result.text
                 output.write(f"{file}: {frame_text or '[пусто]'}\n")
                 combined.write(f"Кадр {idx+1}:\n{frame_text or '[пусто]'}\n\n")
-            except Exception as e:
-                output.write(f"[Ошибка обработки кадра {file}]: {e}\n")
-                combined.write(f"Кадр {idx+1}:\n[Ошибка чтения текста]\n\n")
-                all_results[file] = {"error": str(e)}
+            else:
+                message = result.error or "unknown OCR error"
+                output.write(f"[Ошибка обработки кадра {file}]: {message}\n")
+                combined.write(f"Кадр {idx+1}:\n[Ошибка чтения текста: {message}]\n\n")
+                all_results[file] = {
+                    "error": message,
+                    "attempts": result.attempts,
+                    "raw": result.raw,
+                }
+                print(f"⚠️ OCR кадра {file} не выполнен после {result.attempts} попыток: {message}")
     json.dump(all_results, log, ensure_ascii=False, indent=2)
 print("🔤 Текст с кадров сохранён")
 
@@ -966,28 +962,16 @@ import requests
 
 def extract_text_yandex_vision_image(filepath):
     try:
-        with open(filepath, "rb") as img_file:
-            encoded_image = base64.b64encode(img_file.read()).decode("utf-8")
-        payload = {
-            "folderId": yandex_folder_id,
-            "analyze_specs": [{
-                "content": encoded_image,
-                "features": [{"type": "TEXT_DETECTION", "textDetectionConfig": {"languageCodes": ["*"]}}]
-            }]
-        }
-        headers = {"Authorization": f"Api-Key {yandex_api_key}"}
-        response = requests.post(
-            "https://vision.api.cloud.yandex.net/vision/v1/batchAnalyze",
-            headers=headers, json=payload
+        result = recognize_image_file(
+            filepath,
+            api_key=yandex_api_key,
+            folder_id=yandex_folder_id,
+            attempts=int(os.getenv("YANDEX_VISION_RETRIES", "3")),
+            timeout=int(os.getenv("YANDEX_VISION_TIMEOUT", "90")),
         )
-        result = response.json()
-        blocks = result["results"][0]["results"][0]["textDetection"]["pages"][0]["blocks"]
-        texts = []
-        for block in blocks:
-            for line in block.get("lines", []):
-                line_text = " ".join(word["text"] for word in line.get("words", []))
-                texts.append(line_text)
-        return "\n".join(texts).strip()
+        if result.ok:
+            return result.text
+        return f"[Ошибка Yandex Vision]: {result.error}"
     except Exception as e:
         return f"[Ошибка Yandex Vision]: {e}"
 
