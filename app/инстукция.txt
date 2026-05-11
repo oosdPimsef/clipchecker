@@ -1,0 +1,3 @@
+1. main - пкм - открыть с помощью terminal
+2. браузер http://localhost:8080/
+3.

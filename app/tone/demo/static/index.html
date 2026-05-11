@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>T-one Streaming ASR Demo</title>
+  <link rel="icon" type="image/x-icon" href="/logo.png">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
+  <style>
+    :root {
+      --tk-yellow: #ffd600;
+      --tk-black: #000000;
+      --tk-gray: #f5f5f5;
+    }
+
+    body {
+      background: var(--tk-gray);
+      color: var(--tk-black);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body.drag-over {
+      background-color: #f0f0f0 !important;
+    }
+
+    header {
+      background: var(--tk-yellow);
+    }
+
+    .btn-tk {
+      background: var(--tk-black);
+      color: var(--tk-yellow);
+    }
+
+    .btn-tk:hover {
+      background: #222;
+      color: var(--tk-yellow);
+    }
+
+    .progress-bar {
+      background: var(--tk-yellow);
+      color: var(--tk-black);
+      font-weight: 600;
+    }
+
+    #transcriptList li {
+      animation: fadeIn 0.4s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: none; }
+    }
+
+    #overlay {
+      background: rgba(0, 0, 0, 0.5);
+      display: none;
+      z-index: 1050;
+    }
+
+    #audioPlayerBox {
+      display: none;
+    }
+
+    #overlay .message {
+      text-align: center;
+      font-size: 1.5rem;
+      color: white;
+    }
+
+  </style>
+</head>
+<body>
+  <!-- ============== PROCESS OVERLAY ============== -->
+  <div id="overlay" class="position-fixed top-0 start-0 w-100 h-100 flex-column align-items-center justify-content-center text-white">
+    <div class="spinner-border" role="status" id="overlaySpinner"></div>
+    <p class="mt-3 mb-0" id="overlayText">Processing...</p>
+  </div>
+
+  <!-- =================== HEADER =================== -->
+  <header class="py-3 mb-4 shadow-sm">
+    <div class="container d-flex flex-wrap justify-content-between align-items-center">
+      <div class="d-flex align-items-center gap-3" style="flex: 1">
+        <img src="/logo.png" alt="project logo" width="96" height="96" class="rounded shadow" />
+        <div>
+          <h1 class="h3 fw-bold mb-0">T-one Streaming ASR Demo</h1>
+          <p class="mb-0">A demonstration of a streaming CTC‑based ASR pipeline for Russian</p>
+        </div>
+      </div>
+      <a class="btn btn-outline-dark d-flex align-items-center gap-1" href="https://github.com/voicekit-team/T-one" target="_blank" rel="noopener">
+        <i class="bi bi-github fs-4"></i> GitHub
+      </a>
+    </div>
+  </header>
+
+  <main class="container mb-5">
+    <div class="row g-4">
+      <!-- LEFT: Input / Control -->
+      <div class="col-lg-6">
+        <div class="card shadow-sm p-4 h-100 d-flex flex-column">
+          <ul class="nav nav-tabs mb-3" id="inputTab" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="upload-tab" data-bs-toggle="tab" data-bs-target="#uploadPane" type="button" role="tab" aria-controls="uploadPane" aria-selected="true">
+                <i class="bi bi-file-earmark-music me-1"></i>Upload
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="mic-tab" data-bs-toggle="tab" data-bs-target="#micPane" type="button" role="tab" aria-controls="micPane" aria-selected="false">
+                <i class="bi bi-mic me-1"></i>Microphone
+              </button>
+            </li>
+          </ul>
+
+          <div class="tab-content flex-grow-1" id="inputTabContent">
+            <!-- Upload Pane -->
+            <div class="tab-pane fade show active" id="uploadPane" role="tabpanel">
+              <div class="mb-3">
+                <label for="fileInput" class="form-label fw-semibold">Select an audio file</label>
+                <input id="fileInput" type="file" class="form-control" accept="audio/*" />
+              </div>
+
+              <div id="audioPlayerBox" class="mb-3">
+                <div class="alert alert-secondary shadow-sm small py-2">
+                  <i class="bi bi-info-circle me-1"></i>
+                  The audio has been resampled to mono 16‑bit PCM @ 8&nbsp;kHz to match the ASR input.
+                </div>
+                <audio id="audioPlayer" class="w-100 mb-3" controls></audio>
+              </div>
+
+              <button id="processBtn" class="btn btn-tk w-100 mb-3" disabled>Process</button>
+
+              <label class="form-label fw-semibold mb-1">Streaming progress</label>
+              <div class="progress mb-3" role="progressbar" aria-label="stream progress">
+                <div id="progressBar" class="progress-bar" style="width:0%">0%</div>
+              </div>
+            </div>
+
+            <!-- Microphone Pane -->
+            <div class="tab-pane fade" id="micPane" role="tabpanel">
+              <div class="alert alert-secondary shadow-sm small py-2">
+                <i class="bi bi-info-circle me-1"></i>
+                Recognition is performed phrase by phrase. Make a short pause for the text to appear in the list.
+              </div>
+
+              <div class="d-flex gap-2 mb-3">
+                <button id="startRecBtn" class="btn btn-tk flex-fill"><i class="bi bi-record-circle me-1"></i>Start</button>
+                <button id="stopRecBtn" class="btn btn-outline-dark flex-fill" disabled><i class="bi bi-stop-circle me-1"></i>Stop</button>
+                <span id="timerDisplay" class="text-muted small" style="min-width: 80px; text-align: center; font-family: monospace; display: none;">00:00:00</span>
+              </div>
+
+              <canvas id="micWaveform" class="border rounded bg-white" width="500" height="100" style="display: none;"></canvas>
+              <div id="finalMicAudioContainer" class="mt-3" style="display: none;">
+                <small class="text-muted d-block mb-1">Recorded Audio</small>
+                <audio id="finalMicAudioPlayer" class="w-100 mb-2" controls></audio>
+              </div>
+              <audio id="segmentPlayer" controls style="display: none; width: 100%; margin-top: 10px;"></audio>
+              <div id="micLatencyAlert" class="alert alert-danger shadow-sm d-none small" role="alert"></div>
+            </div>
+          </div>
+
+          <div class="alert alert-warning shadow-sm mt-auto">
+            <strong>Experimental implementation.</strong> The demo runs entirely on a CPU to keep the setup portable. For production‑grade latency and throughput we recommend running the models on a GPU and, where possible, applying runtime optimisations such as TensorRT (not included in the demo).
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Transcript -->
+      <div class="col-lg-6">
+        <div class="card shadow-sm p-4 h-100 d-flex flex-column">
+          <h3 class="h5 fw-bold mb-3 d-flex align-items-center">Transcript
+            <button id="copyBtn" class="btn btn-outline-secondary btn-sm ms-auto me-2" title="Copy JSON">
+              <i class="bi bi-clipboard"></i>
+            </button>
+            <button id="clearTranscriptBtn" class="btn btn-outline-danger btn-sm" title="Clear transcript">
+              <i class="bi bi-trash"></i>
+            </button>
+          </h3>
+          <ul id="transcriptList" class="list-group list-group-flush flex-grow-1 overflow-auto" style="max-height:60vh"></ul>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- SCRIPT -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+  <script>
+    // ========== DOM References ==========
+    const dom = {
+      micWaveform: document.getElementById('micWaveform'),
+      waveCtx: document.getElementById('micWaveform').getContext('2d'),
+      timerDisplay: document.getElementById('timerDisplay'),
+      segmentPlayer: document.getElementById('segmentPlayer'),
+      finalMicAudioPlayer: document.getElementById('finalMicAudioPlayer'),
+      finalMicAudioContainer: document.getElementById('finalMicAudioContainer'),
+      fileInput: document.getElementById('fileInput'),
+      processBtn: document.getElementById('processBtn'),
+      startRecBtn: document.getElementById('startRecBtn'),
+      stopRecBtn: document.getElementById('stopRecBtn'),
+      progressBar: document.getElementById('progressBar'),
+      transcriptList: document.getElementById('transcriptList'),
+      audioPlayer: document.getElementById('audioPlayer'),
+      audioPlayerBox: document.getElementById('audioPlayerBox'),
+      overlay: document.getElementById('overlay'),
+      overlayText: document.getElementById('overlayText'),
+      overlaySpinner: document.getElementById('overlaySpinner'),
+      copyBtn: document.getElementById('copyBtn'),
+      clearTranscriptBtn: document.getElementById('clearTranscriptBtn'),
+      micLatencyAlert: document.getElementById('micLatencyAlert')
+    };
+
+    // ========== State ==========
+    let waveAnimationFrame = null;
+    let waveAudioData = new Float32Array(dom.micWaveform.width);
+    let recordedChunks = [];
+    let isRecordingChunks = false;
+
+    let timerInterval = null;
+    let startTime = null;
+
+    let pcmBytes;
+    let totalChunks = 0;
+    let transcripts = [];
+
+    let mediaStream = null;
+    let audioCtx = null;
+    let processor = null;
+    let ws = null;
+    let outstanding = 0;
+    let backlogChk = null;
+
+    // ========== Constants ==========
+    const CHUNK_SAMPLES = 2400;
+    const CHUNK_BYTES = CHUNK_SAMPLES * 2;
+    const MAX_OUT = 3;
+    const MAX_BACKLOG_SEC = 3;
+
+    // ========== UI Helpers ==========
+    function setProgress(pct) {
+      pct = Math.round(Math.max(0, Math.min(100, pct)));
+      dom.progressBar.style.width = pct + '%';
+      dom.progressBar.textContent = pct + '%';
+    }
+
+    function showOverlay(message, showSpinner) {
+      dom.overlayText.textContent = message;
+      if (showSpinner) {
+        dom.overlaySpinner.classList.remove('d-none');
+      } else {
+        dom.overlaySpinner.classList.add('d-none');
+      }
+      dom.overlay.style.display = 'flex';
+    }
+
+    function hideOverlay() {
+      dom.overlay.style.display = 'none';
+    }
+
+    function resetUI() {
+      setProgress(0);
+      if (finalMicAudioPlayer.src) {
+        URL.revokeObjectURL(finalMicAudioPlayer.src);
+        finalMicAudioPlayer.src = '';
+      }
+      if (segmentPlayer.src) {
+        URL.revokeObjectURL(segmentPlayer.src);
+        segmentPlayer.src = '';
+      }
+      transcripts = [];
+      dom.transcriptList.innerHTML = '';
+      if (dom.audioPlayer) {
+        dom.audioPlayer.src = '';
+        dom.audioPlayerBox.style.display = 'none';
+      }
+      dom.processBtn.disabled = true;
+      dom.micLatencyAlert.classList.add('d-none');
+      if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+
+      if (dom.segmentPlayer) {
+        dom.segmentPlayer.pause();
+        dom.segmentPlayer.src = '';
+        dom.segmentPlayer.style.display = 'none';
+      }
+    }
+
+    // ========== WebSocket ==========
+    function initWebSocket() {
+      ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/ws');
+      ws.binaryType = 'arraybuffer';
+      outstanding = 0;
+
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.event === 'ready') {
+            outstanding = Math.max(outstanding - 1, 0);
+          } else if (msg.event === 'transcript') {
+            appendTranscript(msg.phrase);
+          }
+        } catch (err) {
+          console.error('Bad JSON', err);
+        }
+      };
+      ws.onerror = (e) => console.error('WebSocket error', e);
+      ws.onclose = () => console.log('WebSocket closed');
+    }
+
+    // ========== Audio Helpers ==========
+    function floatToPCM16(floatBuf) {
+      const pcm = new Int16Array(floatBuf.length);
+      for (let i = 0; i < floatBuf.length; i++) {
+        const s = Math.max(-1, Math.min(1, floatBuf[i]));
+        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      return pcm;
+    }
+
+    function pcmToWav(pcmBytes, sampleRate) {
+      const header = new ArrayBuffer(44);
+      const dv = new DataView(header);
+      const write = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+      write(0, 'RIFF'); dv.setUint32(4, 36 + pcmBytes.length, true);
+      write(8, 'WAVEfmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+      dv.setUint32(24, sampleRate, true); dv.setUint32(28, sampleRate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+      write(36, 'data'); dv.setUint32(40, pcmBytes.length, true);
+      return new Blob([header, pcmBytes], { type: 'audio/wav' });
+    }
+
+    function createAudioBlobFromChunks(chunks, startTime, endTime) {
+      const sampleRate = 8000;
+      const startSample = Math.floor(startTime * sampleRate);
+      const endSample = Math.floor(endTime * sampleRate);
+      let totalSamples = 0, chunkIndex = 0;
+      while (chunkIndex < chunks.length && totalSamples + chunks[chunkIndex].length <= startSample) {
+        totalSamples += chunks[chunkIndex].length;
+        chunkIndex++;
+      }
+
+      let result = [], currentSample = startSample;
+      while (chunkIndex < chunks.length && currentSample < endSample) {
+        const chunk = chunks[chunkIndex++];
+        const available = chunk.length;
+        const needed = endSample - currentSample;
+        result.push(chunk.slice(0, Math.min(available, needed)));
+        currentSample += Math.min(available, needed);
+      }
+
+      const totalLength = result.reduce((sum, arr) => sum + arr.length, 0);
+      const interleaved = new Float32Array(totalLength);
+      let offset = 0;
+      for (let i = 0; i < result.length; i++) {
+        interleaved.set(result[i], offset);
+        offset += result[i].length;
+      }
+
+      const pcm = floatToPCM16(interleaved);
+      return pcmToWav(new Uint8Array(pcm.buffer), sampleRate);
+    }
+
+    function playSegment(url) {
+      dom.segmentPlayer.src = url;
+      dom.segmentPlayer.style.display = 'block';
+      dom.segmentPlayer.play();
+    }
+
+    // ========== Waveform ==========
+    function drawWaveform() {
+      waveAnimationFrame = requestAnimationFrame(drawWaveform);
+      dom.waveCtx.clearRect(0, 0, dom.micWaveform.width, dom.micWaveform.height);
+      const centerY = dom.micWaveform.height / 2;
+      const step = Math.floor(waveAudioData.length / dom.micWaveform.width);
+      dom.waveCtx.beginPath();
+      dom.waveCtx.strokeStyle = '#007BFF'; // Синий цвет
+      dom.waveCtx.lineWidth = 2; // Толще и красивее
+      for (let i = 0; i < dom.micWaveform.width; i++) {
+        const index = i * step;
+        const y = centerY + waveAudioData[index] * centerY * 0.9;
+        dom.waveCtx.lineTo(i, Math.max(0, Math.min(dom.micWaveform.height, y)));
+      }
+      dom.waveCtx.stroke();
+    }
+
+    function updateWaveformData(data) {
+      for (let i = 0; i < waveAudioData.length; i++) {
+        waveAudioData[i] = Math.max(-1, Math.min(1, data[i] || 0));
+      }
+    }
+
+    // ========== Transcript ==========
+    function appendTranscript(obj) {
+      transcripts.push(obj);
+      const { text, start_time, end_time } = obj;
+      const li = document.createElement('li');
+      li.className = 'list-group-item d-flex justify-content-between align-items-start';
+      const audioBlob = createAudioBlobFromChunks(recordedChunks, start_time, end_time);
+      const audioUrl = URL.createObjectURL(audioBlob);
+      li.innerHTML = `
+        <div class="me-auto">${text}</div>
+        <div class="d-flex align-items-center gap-2">
+          <span class="badge bg-dark rounded-pill">${start_time.toFixed(2)} – ${end_time.toFixed(2)} s</span>
+          <button class="btn btn-sm btn-outline-secondary" onclick="playSegment('${audioUrl}')">
+            <i class="bi bi-play-fill"></i>
+          </button>
+        </div>
+      `;
+      dom.transcriptList.appendChild(li);
+      li.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    // ========== File Upload ==========
+    document.body.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      showOverlay('Drop audio file here to upload', false);
+    });
+
+    document.body.addEventListener('dragleave', (e) => {
+      if (
+        e.clientX <= 0 ||
+        e.clientY <= 0 ||
+        e.clientX >= window.innerWidth ||
+        e.clientY >= window.innerHeight
+      ) {
+        hideOverlay();
+      }
+    });
+
+    document.body.addEventListener('drop', (e) => {
+      e.preventDefault();
+      hideOverlay();
+
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith('audio/')) {
+        const uploadTab = new bootstrap.Tab(document.getElementById('upload-tab'));
+        uploadTab.show();
+
+        resetUI();
+        dom.fileInput.files = e.dataTransfer.files;
+        const event = new Event('change', { bubbles: true });
+        dom.fileInput.dispatchEvent(event);
+      }
+    });
+
+    dom.fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      resetUI();
+      showOverlay('Decoding & resampling to 8 kHz...', true);
+      try {
+        pcmBytes = await resampleToPCM(file, 8000);
+        totalChunks = Math.ceil(pcmBytes.length / CHUNK_BYTES);
+        const wavBlob = pcmToWav(pcmBytes, 8000);
+        dom.audioPlayer.src = URL.createObjectURL(wavBlob);
+        dom.audioPlayerBox.style.display = 'block';
+        dom.processBtn.disabled = false;
+      } catch (err) {
+        alert('Failed to decode or resample the file: ' + err.message);
+        console.error(err);
+      } finally {
+        hideOverlay();
+      }
+    });
+
+    dom.processBtn.addEventListener('click', () => startStreamingUpload());
+
+    // ========== Microphone ==========
+    dom.startRecBtn.addEventListener('click', startMicCapture);
+    dom.stopRecBtn.addEventListener('click', () => stopMicCapture());
+
+    // ========== Events ==========
+    dom.clearTranscriptBtn.addEventListener('click', () => {
+      dom.transcriptList.innerHTML = '';
+      transcripts = [];
+      dom.segmentPlayer.pause();
+      dom.segmentPlayer.src = '';
+      dom.segmentPlayer.style.display = 'none';
+    });
+
+    dom.copyBtn.addEventListener('click', () => {
+      if (transcripts.length === 0) {
+        alert('Нет данных для копирования. Сначала загрузите аудио или запишите речь.');
+        return;
+      }
+
+      const jsonStr = JSON.stringify(transcripts, null, 2);
+      navigator.clipboard.writeText(jsonStr).then(() => {
+        dom.copyBtn.innerHTML = '<i class="bi bi-check-lg"></i>';
+        dom.copyBtn.classList.remove('btn-outline-secondary');
+        dom.copyBtn.classList.add('btn-success');
+
+        setTimeout(() => {
+          dom.copyBtn.innerHTML = '<i class="bi bi-clipboard"></i>';
+          dom.copyBtn.classList.remove('btn-success');
+          dom.copyBtn.classList.add('btn-outline-secondary');
+        }, 1500);
+      }).catch(err => {
+        console.error('Ошибка копирования в буфер обмена:', err);
+        alert('Не удалось скопировать данные в буфер обмена.');
+      });
+    });
+
+    // ========== Helpers ==========
+    async function resampleToPCM(file, targetRate) {
+      const arrayBuffer = await file.arrayBuffer();
+      const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: targetRate });
+      const decoded = await ctx.decodeAudioData(arrayBuffer);
+      await ctx.close();
+
+      const { numberOfChannels, length } = decoded;
+      const mono = new Float32Array(length);
+      for (let ch = 0; ch < numberOfChannels; ch++) {
+        const data = decoded.getChannelData(ch);
+        for (let i = 0; i < length; i++) mono[i] += data[i];
+      }
+      const inv = 1 / numberOfChannels;
+      for (let i = 0; i < length; i++) mono[i] *= inv;
+
+      const pcm16 = floatToPCM16(mono);
+      return new Uint8Array(pcm16.buffer);
+    }
+
+    function startStreamingUpload() {
+      if (!pcmBytes) return;
+      dom.processBtn.disabled = true;
+      setProgress(0);
+      transcripts = [];
+      dom.transcriptList.innerHTML = '';
+      recordedChunks = [];
+
+      const intPCM = new Int16Array(pcmBytes.buffer);
+      const floatPCM = new Float32Array(intPCM.length);
+      for (let i = 0; i < intPCM.length; i++) {
+        floatPCM[i] = intPCM[i] / 32768.0;
+      }
+
+      for (let i = 0; i < floatPCM.length; i += CHUNK_SAMPLES) {
+        recordedChunks.push(floatPCM.slice(i, i + CHUNK_SAMPLES));
+      }
+
+      ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/ws');
+      ws.binaryType = 'arraybuffer';
+
+      let offset = 0, sent = 0, outstanding = 1;
+      const pushCompleted = { val: false };
+
+      const pushChunks = () => {
+        if (pushCompleted.val) return;
+        while (outstanding < MAX_OUT) {
+          if (offset >= pcmBytes.length) {
+            pushCompleted.val = true;
+            ws.send(new Uint8Array());
+            break;
+          }
+          ws.send(pcmBytes.slice(offset, offset + CHUNK_BYTES));
+          offset += CHUNK_BYTES;
+          sent++;
+          outstanding++;
+          setProgress((sent / totalChunks) * 100);
+        }
+      };
+
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.event === 'ready') {
+            outstanding = Math.max(outstanding - 1, 0);
+            pushChunks();
+          } else if (msg.event === 'transcript') {
+            appendTranscript(msg.phrase);
+          }
+        } catch (err) {
+          console.error('Bad JSON', err);
+        }
+      };
+
+      ws.onclose = () => {
+        dom.processBtn.disabled = false;
+        setProgress(100);
+      };
+
+      ws.onerror = (e) => console.error('WebSocket error', e);
+
+      ws.onopen = () => pushChunks();
+    }
+
+    async function startMicCapture() {
+      resetUI();
+      recordedChunks = [];
+      isRecordingChunks = true;
+
+      dom.micWaveform.style.display = 'block';
+      if (waveAnimationFrame) cancelAnimationFrame(waveAnimationFrame);
+      drawWaveform();
+
+      dom.timerDisplay.style.display = 'inline-block';
+      startTime = Date.now();
+
+      timerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const hours = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+        const minutes = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+        const seconds = String(elapsed % 60).padStart(2, '0');
+        dom.timerDisplay.textContent = `${hours}:${minutes}:${seconds}`;
+      }, 1000);
+
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false });
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 8000 });
+        const input = audioCtx.createMediaStreamSource(mediaStream);
+        processor = (audioCtx.createScriptProcessor || audioCtx.createJavaScriptNode).call(audioCtx, 1024, 1, 1);
+        input.connect(processor);
+        processor.connect(audioCtx.destination);
+
+        initWebSocket();
+
+        let buffer8k = [];
+        processor.onaudioprocess = (ev) => {
+          const data = ev.inputBuffer.getChannelData(0);
+          buffer8k.push(...data);
+          if (isRecordingChunks) recordedChunks.push(new Float32Array(data));
+          updateWaveformData(data);
+
+          while (buffer8k.length >= CHUNK_SAMPLES) {
+            const chunk = buffer8k.slice(0, CHUNK_SAMPLES);
+            buffer8k = buffer8k.slice(CHUNK_SAMPLES);
+            const pcm16 = floatToPCM16(chunk);
+            ws.send(new Uint8Array(pcm16.buffer));
+            outstanding++;
+          }
+        };
+
+        dom.startRecBtn.disabled = true;
+        dom.stopRecBtn.disabled = false;
+
+        backlogChk = setInterval(() => {
+          const lagSec = outstanding * 0.3;
+          if (lagSec > MAX_BACKLOG_SEC) {
+            stopMicCapture(`The server is more than ${MAX_BACKLOG_SEC} s behind the real-time stream.`);
+          }
+        }, 1000);
+      } catch (err) {
+        alert('Unable to access microphone: ' + err.message);
+        console.error(err);
+      }
+    }
+
+    function stopMicCapture(reason = '') {
+      if (finalMicAudioPlayer.src) {
+        URL.revokeObjectURL(finalMicAudioPlayer.src);
+        finalMicAudioPlayer.src = '';
+      }
+      if (segmentPlayer.src) {
+        URL.revokeObjectURL(segmentPlayer.src);
+        segmentPlayer.src = '';
+      }
+      if (processor) {
+        processor.disconnect();
+        processor.onaudioprocess = null;
+        processor = null;
+      }
+      if (audioCtx) {
+        audioCtx.close();
+        audioCtx = null;
+      }
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(t => t.stop());
+        mediaStream = null;
+      }
+      if (backlogChk) {
+        clearInterval(backlogChk);
+        backlogChk = null;
+      }
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(new Uint8Array());
+      }
+
+      dom.startRecBtn.disabled = false;
+      dom.stopRecBtn.disabled = true;
+      setProgress(0);
+
+      if (reason) {
+        dom.micLatencyAlert.textContent = reason;
+        dom.micLatencyAlert.classList.remove('d-none');
+      }
+
+      isRecordingChunks = false;
+      dom.micWaveform.style.display = 'none';
+
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+      dom.timerDisplay.textContent = '00:00:00';
+      dom.timerDisplay.style.display = 'none';
+
+      if (waveAnimationFrame) {
+        cancelAnimationFrame(waveAnimationFrame);
+        waveAnimationFrame = null;
+      }
+      dom.waveCtx.clearRect(0, 0, dom.micWaveform.width, dom.micWaveform.height);
+
+      if (dom.segmentPlayer) {
+        dom.segmentPlayer.pause();
+        dom.segmentPlayer.src = '';
+        dom.segmentPlayer.style.display = 'none';
+      }
+
+      if (recordedChunks.length > 0) {
+        const totalLength = recordedChunks.reduce((sum, arr) => sum + arr.length, 0);
+        const fullRecording = new Float32Array(totalLength);
+        let offset = 0;
+        for (let i = 0; i < recordedChunks.length; i++) {
+          fullRecording.set(recordedChunks[i], offset);
+          offset += recordedChunks[i].length;
+        }
+
+        const pcm = floatToPCM16(fullRecording);
+        const wavBlob = pcmToWav(new Uint8Array(pcm.buffer), 8000);
+        const wavUrl = URL.createObjectURL(wavBlob);
+
+        dom.finalMicAudioPlayer.src = wavUrl;
+        dom.finalMicAudioContainer.style.display = 'block';
+      }
+    }
+
+    // ========== Tab Switch Cleanup ==========
+    const inputTab = document.getElementById('inputTab');
+    inputTab.addEventListener('hide.bs.tab', () => {
+      resetUI();
+      if (dom.segmentPlayer) {
+        dom.segmentPlayer.pause();
+        dom.segmentPlayer.src = '';
+        dom.segmentPlayer.style.display = 'none';
+      }
+    });
+  </script>
+</body>
+</html>

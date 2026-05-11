@@ -1,0 +1,442 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Clipchecker — результаты анализа</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+
+  <style>
+    /* ===== ЕДИНЫЕ ДИЗАЙН-ТОКЕНЫ (совпадают с form.html) ===== */
+    :root{
+      --accent:#000076;            /* бренд clipchecker */
+      --bg:#fcfcfd;
+      --surface:#ffffff;
+      --card:#ffffff;
+      --border:#e6e8eb;
+      --shadow:0 8px 24px rgba(0,0,0,.06);
+      --fg:#0f172a;
+      --muted:#667085;
+      --radius:14px;
+      --radius-sm:10px;
+
+      /* Локальные акценты для секций предобработки (под иконки) */
+      --accent-video: var(--accent);
+      --accent-faces: #f59e0b;
+      --accent-dialog:#0b74de;
+      --accent-music: #8b5cf6;
+      --accent-report:#ef4444;
+      --accent-text:  #0ea5a4;
+      --accent-specs: #06b6d4;
+    }
+    @media (prefers-color-scheme: dark){
+      :root{
+        --bg:#0b0f17; --surface:#0d1220; --card:#0f1526;
+        --border:#1f2937; --fg:#e5e7eb; --muted:#94a3b8;
+        --shadow:0 10px 30px rgba(0,0,0,.35);
+      }
+    }
+
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+      font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,"Noto Sans","Helvetica Neue",Arial}
+    a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+    /* ===== ШАПКА ===== */
+    .brandbar{
+      position:sticky; top:0; z-index:10;
+      display:flex;align-items:center;gap:12px;
+      padding:12px 20px; background:linear-gradient(0deg, rgba(0,0,0,0.02), rgba(0,0,0,0.02)), var(--surface);
+      border-bottom:1px solid var(--border);
+    }
+    .brandbar img{height:42px;object-fit:contain;-webkit-user-drag:none;user-select:none;opacity:.95}
+
+    /* ===== СЕТКА ===== */
+    .wrap{max-width:1400px;margin:24px auto;padding:0 16px;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+    @media (max-width:1100px){ .wrap{grid-template-columns:1fr} }
+
+    .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px}
+    .left-col .card{padding:18px}
+    h2{margin:4px 0 14px;font-size:20px;line-height:1.25}
+
+    /* ===== DETAILS / SUMMARY (раскрывашки) ===== */
+    details{border:1px solid var(--border);border-radius:12px;background:var(--surface);margin:10px 0;overflow:hidden}
+    summary{
+      list-style:none;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:10px;
+      padding:10px 12px; user-select:none;
+    }
+    summary::-webkit-details-marker{display:none}
+    
+    /*summary::before{
+      content:""; width:10px; height:10px; border-radius:50%;
+      background:var(--local-accent, var(--accent)); flex:0 0 10px;
+      box-shadow:0 0 0 4px color-mix(in srgb, var(--local-accent, var(--accent)) 18%, transparent);
+    }*/
+
+    details[open]{box-shadow:inset 0 1px 0 rgba(0,0,0,0.02)}
+    details[open] > *:not(summary){padding:12px;border-top:1px dashed var(--border)}
+    .brand-icon{height:16px;vertical-align:-3px}
+
+    /* Локальные акцентные цвета по типам секций */
+    details.a-video  {--local-accent:var(--accent-video)}
+    details.a-faces  {--local-accent:var(--accent-faces)}
+    details.a-dialog {--local-accent:var(--accent-dialog)}
+    details.a-music  {--local-accent:var(--accent-music)}
+    details.a-report {--local-accent:var(--accent-report)}
+    details.a-text   {--local-accent:var(--accent-text)}
+    details.a-specs  {--local-accent:var(--accent-specs)}
+
+    /* ===== ТЕХНИЧЕСКИЕ ЭЛЕМЕНТЫ ===== */
+    pre{white-space:pre-wrap;word-break:break-word;background:color-mix(in srgb, var(--surface) 96%, black);
+        border:1px solid var(--border);border-radius:12px;padding:10px;margin:0}
+    table{border-collapse:collapse;width:100%;background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+    th,td{border:1px solid var(--border);padding:8px;text-align:left;font-variant-numeric:tabular-nums}
+    .pdf-frame{width:100%;height:480px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+    .pdf-note{margin:6px 0 0;color:var(--muted);font-size:12px}
+
+    /* ===== ЛОГИ (онлайн) ===== */
+    .status-dot{width:10px;height:10px;border-radius:50%;display:inline-block;box-shadow:0 0 0 2px var(--surface) inset}
+    .status-dot.red{background:#f85149}
+    .status-dot.green{background:#2ea043}
+    .log-timer{margin-left:6px;color:var(--muted)}
+    .live-log-box{border:1px dashed var(--border);border-radius:12px;padding:10px;background:color-mix(in srgb, var(--surface) 94%, black)}
+    .live-log-title{font-size:12px;color:var(--muted)}
+    .live-log-pre{height:420px;overflow:auto;background:transparent;border:none;margin:6px 0 0;color:#1a7f37}
+    @media (prefers-color-scheme: dark){ .live-log-pre{color:#bfe8bf} }
+
+    /* ===== ЧАТ ===== */
+    .chat-box{border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:12px}
+    .chat-thread{height:280px;overflow:auto;border:1px solid var(--border);border-radius:10px;background:color-mix(in srgb, var(--surface) 96%, black);padding:10px;margin:6px 0 10px}
+    .msg{margin:0 0 10px}
+    .msg .who{font-weight:600;margin-bottom:2px}
+    .msg.assistant .who{color:#0b74de}
+    .msg.user .who{color:#16a34a}
+    .msg.user .text{color:#15803d;font-weight:700;font-size:1rem}
+    .msg.assistant .text{color:#2b2b2b;font-size:.9rem}
+    @media (prefers-color-scheme: dark){
+      .msg.assistant .text{color:#e5e7eb}
+    }
+    .chat-form .row-input{display:block}
+    .chat-form textarea{
+      width:100%;min-height:44px;resize:vertical;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--fg);font:inherit
+    }
+    .chat-form .row-actions{margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .chat-form input[type=file]{flex:1;min-width:240px}
+    .chat-form button{
+      background:var(--accent);color:#fff;border:0;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer
+    }
+    .chat-form button:hover{filter:brightness(1.05)}
+    .chat-q-timer{
+      display:inline-flex;align-items:center;justify-content:center;
+      border:1px solid var(--border);border-radius:10px;background:var(--surface);
+      padding:6px 10px;color:var(--muted);font-weight:700;min-width:84px;font-variant-numeric:tabular-nums;
+    }
+
+    /* Подсветки строк проверки техтребований */
+    .row-ok td{background:#eaffea}
+    .row-fail td{background:#ffeaea}
+    .row-missing td{background:#ef4444}
+    
+    /* Иконка справа в заголовке summary */
+    .brand-icon.sum-right{ margin-left:auto; height:16px; vertical-align:-3px; opacity:.95 }
+    
+    /* 🔴 ДОБАВЛЕНО: подсветка проблем/рисков в блоке ChatGPT */
+    pre .risk{
+      background:#e0685f;         /* бледно-красный фон */
+      border-left:3px solid #ef4444;
+      padding:1px 3px;
+      border-radius:6px;
+    }
+    /* 🔎 Размер шрифта только для вывода ChatGPT */
+    .chatgpt-output {
+        font-size: 11px;     /* ← измените цифру на нужный размер */
+        line-height: 1.2;    /* чуть больше межстрочный интервал для читаемости */
+    }
+
+
+    /* 🔎 Размер шрифта только для вывода YandexGPT */
+    .yandexgpt-output {
+        font-size: 11px;     /* ← задайте здесь нужный размер */
+        line-height: 1.2;
+    }
+
+
+
+  </style>
+</head>
+<body>
+
+  <header class="brandbar">
+    <img src="/identity/clipchecker.png" alt="Clipchecker">
+    <img src="/identity/adv.png" alt="ADV IT">
+  </header>
+
+  <main class="wrap">
+    <!-- ЛЕВАЯ КОЛОНКА -->
+    <section class="card left-col">
+      <h2>Предобработка рекламных материалов</h2>
+
+      <details class="a-video" {% if analysis_done %}open{% endif %}>
+        <summary><img class="brand-icon" alt="" src="/identity/video.png">Кадры ролика — Annotated_Frames.pdf</summary>
+        <iframe class="pdf-frame" src="/pdf#view=FitH" title="Annotated_Frames"></iframe>
+        <div class="pdf-note">Если PDF не отображается, <a href="/pdf" target="_blank" rel="noreferrer">откройте в новой вкладке</a>.</div>
+      </details>
+
+      <details class="a-faces">
+        <summary><img class="brand-icon" alt="" src="/identity/faces.png">Лица — Faces_Thumbnails (PDF)</summary>
+        <iframe class="pdf-frame" src="/faces.pdf#view=FitH" title="Faces_Thumbnails"></iframe>
+        <div class="pdf-note">Если PDF не отображается, <a href="/faces.pdf" target="_blank" rel="noreferrer">откройте в новой вкладке</a>.</div>
+      </details>
+
+      <details class="a-faces">
+        <summary><img class="brand-icon" alt="" src="/identity/faces.png">Распознавание лиц (Telegram бот)</summary>
+        <pre>{{ face_recognition }}</pre>
+      </details>
+
+      <details class="a-dialog">
+        <summary><img class="brand-icon" alt="" src="/identity/dialog.png">Озвучка (FasterWhisper)</summary>
+        <pre>{{ speech_fasterwhisper }}</pre>
+      </details>
+
+      <details class="a-dialog">
+        <summary><img class="brand-icon" alt="" src="/identity/dialog.png">Озвучка (Yandex SpeechKit)</summary>
+        <pre>{{ speech_yandex }}</pre>
+      </details>
+
+      <details class="a-music">
+        <summary><img class="brand-icon" alt="" src="/identity/music.png">Музыка (mutagen)</summary>
+        <pre>{{ music_info }}</pre>
+      </details>
+
+      <details class="a-music">
+        <summary><img class="brand-icon" alt="" src="/identity/music.png">Музыка (Shazam)</summary>
+        <pre>{{ music_shazam }}</pre>
+      </details>
+
+      <details class="a-report">
+        <summary><img class="brand-icon" alt="" src="/identity/report.png">Текст с кадров (OCR)</summary>
+        <pre>{{ ocr_text }}</pre>
+      </details>
+
+      <details class="a-report">
+        <summary><img class="brand-icon" alt="" src="/identity/report.png">Отчёт по набивкам (Overlay_Report.txt)</summary>
+        <pre>{{ overlay_report }}</pre>
+      </details>
+
+      <details class="a-text">
+        <summary><img class="brand-icon" alt="" src="/identity/text.png">Тексты документов</summary>
+        <pre>{{ document_texts }}</pre>
+      </details>
+
+      <details class="a-specs">
+        <summary><img class="brand-icon" alt="" src="/identity/specs.png"> Параметры эфирного видео <img class="brand-icon sum-right" alt="" src="/identity/tech.png"></summary>
+        <pre>{{ broadcast_params }}</pre>
+      </details>
+
+      <details class="a-specs">
+        <summary><img class="brand-icon" alt="" src="/identity/specs.png"> Проверка техтребований (JSON) <img class="brand-icon sum-right" alt="" src="/identity/tech.png"></summary>
+        {% if tech_validation_data and tech_validation_data|length > 0 %}
+          <table>
+            <thead>
+              <tr><th>Параметр</th><th>Факт</th><th>Ожидание</th><th>Диапазон/описание</th><th>OK</th></tr>
+            </thead>
+            <tbody>
+              {% for row in tech_validation_data %}
+              <tr class="{% if row.actual == '[не найдено]' %}row-missing{% elif row.ok %}row-ok{% elif row.not_supported or row.actual == '[не проверяется]' %}{% else %}row-fail{% endif %}">
+                <td>{{ row.param }}</td>
+                <td>{{ row.actual }}</td>
+                <td>{{ row.expected }}</td>
+                <td>{{ row.range }}</td>
+                <td>{% if row.ok %}✅{% elif row.not_supported %}—{% else %}❌{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <pre>Нет данных Tech_Validation_Result.json</pre>
+        {% endif %}
+      </details>
+    </section>
+
+    <!-- ПРАВАЯ КОЛОНКА -->
+    <section class="card">
+      <h2>ИИ‑обработка</h2>
+
+      <!-- Онлайн‑лог -->
+      <details id="live-log-wrap" {% if not analysis_done %}open{% endif %}>
+        <summary>
+          <span id="log-status-dot" class="status-dot"></span>
+          Онлайн‑лог выполнения
+          <span class="log-timer"><strong id="log-timer">00:00</strong></span>
+        </summary>
+        <div class="live-log-box">
+          <div class="live-log-title">stream: Clipchecker_materials/clipchecker.log</div>
+          <pre id="live-log-output" class="live-log-pre">{{ runtime_log }}</pre>
+          <small><a href="/log.txt" target="_blank" rel="noreferrer">Скачать clipchecker.log</a></small>
+        </div>
+      </details>
+
+      <details open>
+        <summary><img src="/brand/openai_logo.png" alt="OpenAI" class="brand-icon">Результаты обработки в ChatGPT</summary>
+        <pre class="chatgpt-output">{{ openai_review }}</pre>
+      </details>
+
+      <!-- Чат с ChatGPT -->
+      <details open>
+        <summary>💬 Чат с ChatGPT (продолжение диалога)</summary>
+        <div class="chat-box">
+          <div id="chat-thread" class="chat-thread"></div>
+
+          <form id="chat-form" class="chat-form" enctype="multipart/form-data">
+            <div class="row-input">
+              <textarea name="message" placeholder="Задайте уточняющий вопрос…"></textarea>
+            </div>
+            <div class="row-actions">
+              <input type="file" name="files" multiple>
+              <span id="chat-q-timer" class="chat-q-timer">00:00</span>
+              <button type="submit">Отправить</button>
+            </div>
+          </form>
+          <div class="small">Поддерживаются изображения (jpg/png/webp/gif) и текстовые файлы (txt/md/json/csv). PDF — не поддерживается при прямой загрузке в чат.</div>
+        </div>
+      </details>
+
+      <details>
+        <summary><img src="/brand/yandex_logo.png" alt="YandexGPT" class="brand-icon">Результаты анализа YandexGPT</summary>
+        <pre class="yandexgpt-output">{{ legal_analysis_full }}</pre>
+      </details>
+    </section>
+  </main>
+
+  {% if not analysis_done %}
+  <script>
+    // Таймер + поток логов во время выполнения
+    (function(){
+      var K_STARTED='clipchecker_run_start_ms', K_LAST='clipchecker_last_elapsed_text';
+      function fmt(ms){ ms=Math.max(0,ms|0);var s=Math.floor(ms/1000),h=Math.floor(s/3600);s-=h*3600;var m=Math.floor(s/60);s-=m*60;function p(x){return(x<10?'0':'')+x}return (h>0?(p(h)+':'):'')+p(m)+':'+p(s); }
+      var dot=document.getElementById('log-status-dot'), timer=document.getElementById('log-timer');
+      if(dot){ dot.classList.remove('green'); dot.classList.add('red'); }
+      if(timer){ timer.textContent='00:00'; }
+      var startMs=parseInt(localStorage.getItem(K_STARTED)||'0',10); if(!startMs){ startMs=Date.now(); localStorage.setItem(K_STARTED,String(startMs)); }
+      var intId=setInterval(function(){ if(timer) timer.textContent=fmt(Date.now()-startMs); },1000);
+
+      try{
+        var out=document.getElementById("live-log-output"), wrap=document.getElementById("live-log-wrap");
+        var es=new EventSource("/stream-logs");
+        es.onmessage=function(ev){ if(!out) return; out.textContent+=(out.textContent?"\n":"")+ev.data; out.scrollTop=out.scrollHeight; };
+        es.addEventListener("done",function(){
+          try{
+            var elapsed=fmt(Date.now()-startMs);
+            localStorage.setItem(K_LAST, elapsed);
+            localStorage.removeItem(K_STARTED);
+            if(dot){ dot.classList.remove('red'); dot.classList.add('green'); }
+            if(wrap){ wrap.removeAttribute('open'); }
+            clearInterval(intId);
+          }catch(e){}
+          try{ es.close(); }catch(e){}
+          setTimeout(function(){ location.reload(); }, 800);
+        });
+      }catch(e){}
+    })();
+  </script>
+  {% else %}
+  <script>
+    // После завершения: фиксируем время и сворачиваем лог
+    (function(){
+      var K_LAST='clipchecker_last_elapsed_text';
+      var dot=document.getElementById('log-status-dot'), timer=document.getElementById('log-timer');
+      if(dot){ dot.classList.remove('red'); dot.classList.add('green'); }
+      if(timer){ var saved=localStorage.getItem(K_LAST); timer.textContent = (saved && saved.trim()) ? saved : '—'; }
+      try{ var wrap=document.getElementById('live-log-wrap'); if(wrap) wrap.removeAttribute('open'); }catch(e){}
+    })();
+  </script>
+  {% endif %}
+
+  <!-- ЧАТ: логика -->
+  <script>
+    function fmtShort(ms){
+      ms = Math.max(0, ms|0);
+      var s = Math.floor(ms/1000), m = Math.floor(s/60); s -= m*60;
+      function p(x){return (x<10?'0':'')+x;}
+      return p(m)+':'+p(s);
+    }
+
+    // Скрываем «первичный» длинный стартовый запрос из истории чата
+    function isSeedLongUserMessage(m){
+      if(!m || m.role!=='user') return false;
+      var text = '';
+      if(Array.isArray(m.content)){
+        for(var i=0;i<m.content.length;i++){
+          var c=m.content[i];
+          if(c && (c.type==='input_text' || c.type==='output_text') && typeof c.text==='string'){
+            text += c.text + '\n';
+          }
+        }
+      }else if(typeof m.content==='string'){ text = m.content; }
+      var t=(text||'').toLowerCase();
+      if(t.length>800) return true;
+      return (t.indexOf('материалы для анализа')>=0)||(t.indexOf('buyer_experience')>=0)||(t.indexOf('ниже приложены')>=0);
+    }
+
+    function renderMessages(msgs){
+      var box=document.getElementById('chat-thread');
+      if(!box) return;
+      box.innerHTML='';
+      var startIdx=-1;
+      for(var i=0;i<(msgs||[]).length;i++){
+        var m=msgs[i];
+        if(m.role==='user' && !isSeedLongUserMessage(m)){ startIdx=i; break; }
+      }
+      if(startIdx===-1) return; // чат пустой
+
+      for(var j=startIdx;j<msgs.length;j++){
+        var m=msgs[j];
+        if(m.role==='system') continue;
+        var who = m.role==='assistant' ? 'ChatGPT' : 'Вы';
+        var text='';
+        if(Array.isArray(m.content)){
+          m.content.forEach(function(c){
+            if(c && (c.type==='input_text' || c.type==='output_text') && c.text){ text+=c.text+'\n'; }
+            else if(c && c.type==='input_image'){ text+='[изображение]\n'; }
+          });
+        }else if(typeof m.content==='string'){ text=m.content; }
+        var div=document.createElement('div');
+        div.className='msg '+(m.role||'');
+        var textHtml=(text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
+        div.innerHTML='<div class="who">'+who+':</div><div class="text">'+textHtml+'</div>';
+        box.appendChild(div);
+      }
+      box.scrollTop=box.scrollHeight;
+    }
+
+    function loadHistory(){
+      fetch('/chat/history').then(r=>r.json()).then(function(j){
+        if(j && j.ok){ renderMessages(j.messages); }
+      }).catch(function(){});
+    }
+
+    var chatTimerId=null, chatTimerStart=0;
+    function startChatTimer(){
+      var el=document.getElementById('chat-q-timer');
+      if(!el) return;
+      if(chatTimerId){ clearInterval(chatTimerId); chatTimerId=null; }
+      chatTimerStart=Date.now(); el.textContent='00:00';
+      chatTimerId=setInterval(function(){ el.textContent=fmtShort(Date.now()-chatTimerStart); }, 500);
+    }
+    function stopChatTimer(){ if(chatTimerId){ clearInterval(chatTimerId); chatTimerId=null; } }
+
+    document.getElementById('chat-form').addEventListener('submit', function(ev){
+      ev.preventDefault();
+      var fd=new FormData(ev.target);
+      startChatTimer();
+      fetch('/chat/send', {method:'POST', body:fd}).then(r=>r.json()).then(function(j){
+        stopChatTimer();
+        if(j && j.ok){ renderMessages(j.messages); ev.target.reset(); }
+        else{ alert('Ошибка: '+(j && j.error || 'неизвестно')); }
+      }).catch(function(e){ stopChatTimer(); alert('Ошибка сети: '+e); });
+    });
+
+    // Первая загрузка истории
+    loadHistory();
+  </script>
+</body>
+</html>

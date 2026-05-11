@@ -1,0 +1,128 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Clipchecker — запуск анализа</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root{
+      /* ===== ДИЗАЙН-ТОКЕНЫ (единые для обеих страниц) ===== */
+      --accent: #000076;             /* основной бренд-цвет (из логотипа clipchecker, как в текущей версии) */
+      --bg: #fcfcfd;
+      --surface: #ffffff;
+      --card: #ffffff;
+      --border: #e6e8eb;
+      --shadow: 0 8px 24px rgba(0,0,0,0.06);
+      --fg: #0f172a;
+      --muted: #667085;
+
+      /* Размерность */
+      --radius: 14px;
+      --radius-sm: 10px;
+      --pad: 16px;
+      --pad-lg: 20px;
+      --maxw: 880px;
+    }
+    @media (prefers-color-scheme: dark){
+      :root{
+        --bg:#0b0f17; --surface:#0d1220; --card:#0f1526;
+        --border:#1f2937; --fg:#e5e7eb; --muted:#94a3b8;
+        --shadow: 0 10px 30px rgba(0,0,0,0.35);
+      }
+    }
+
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+      font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,"Noto Sans","Helvetica Neue",Arial}
+    a{color:var(--accent);text-decoration:none}
+    a:hover{text-decoration:underline}
+
+    /* ===== ШАПКА С ЛОГОТИПАМИ ===== */
+    .brandbar{
+      position:sticky; top:0; z-index:10;
+      display:flex;align-items:center; /* логотипы слева в одну линию */
+      gap:16px; padding:12px 20px;
+      background:linear-gradient(0deg, rgba(0,0,0,0.02), rgba(0,0,0,0.02)), var(--surface);
+      border-bottom:1px solid var(--border);
+    }
+    .brandbar img{height:42px;object-fit:contain;-webkit-user-drag:none;user-select:none;opacity:.95}
+
+    /* ===== КОНТЕЙНЕР/КАРТОЧКА ===== */
+    .wrap{max-width:var(--maxw);margin:32px auto;padding:0 16px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:var(--pad-lg)}
+    h1{margin:0 0 12px;font-size:22px;line-height:1.25}
+    p.lead{margin:0 0 18px;color:var(--muted)}
+
+    /* ===== ФОРМА ===== */
+    .form-layout{display:grid;grid-template-columns:1fr auto;gap:24px;align-items:end}
+    .fields{display:grid;gap:14px}
+    label{font-size:12px;color:var(--muted);display:block;margin:0 0 6px}
+    .txt, select{
+      width:100%;padding:12px 12px;border:1px solid var(--border);border-radius:12px;background:#fff;color:#0f172a;
+      outline:none;transition:border .15s, box-shadow .15s;
+    }
+    @media (prefers-color-scheme: dark){
+      .txt, select{background:#0b1020;color:var(--fg)}
+    }
+    .txt:focus, select:focus{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent)}
+    small.help{display:block;margin-top:6px;color:var(--muted)}
+
+    /* Кнопка в виде изображения (как в текущем проекте) */
+    .image-button{background:transparent;border:0;padding:0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+    .image-button img{width:220px;height:auto;display:block;transition:transform .06s ease, filter .2s ease, box-shadow .2s ease}
+    .image-button:hover img{filter:drop-shadow(0 10px 18px rgba(0,0,0,.15))}
+    .image-button:active img{transform:scale(.97)}
+
+    /* Мобильная колонка */
+    @media (max-width:720px){ .form-layout{grid-template-columns:1fr} .image-button{justify-content:flex-start} }
+  </style>
+</head>
+<body>
+  <header class="brandbar">
+    <img src="/identity/clipchecker.png" alt="Clipchecker">
+    <img src="/identity/adv.png" alt="ADV IT">
+  </header>
+
+  <main class="wrap">
+    <section class="card">
+      <h1>Загрузка материалов</h1>
+      <p class="lead">Укажите папки с превью-видео, документами и эфирной версией. Пути могут быть из любого места на вашем компьютере.</p>
+
+      <form method="post" action="/" class="form-layout">
+        <div class="fields">
+          <div>
+            <label for="preview">Видеоролик (превью)</label>
+            <input class="txt" type="text" id="preview" name="preview" required placeholder="Например: D:\Projects\clip\preview\">
+          </div>
+
+          <div>
+            <label for="docs">Документы</label>
+            <input class="txt" type="text" id="docs" name="docs" required placeholder="Например: D:\Projects\clip\docs\">
+          </div>
+
+          <div>
+            <label for="broadcast">Эфирная версия</label>
+            <input class="txt" type="text" id="broadcast" name="broadcast" required placeholder="Например: D:\Projects\clip\broadcast\">
+          </div>
+
+          <div>
+            <label for="openai_model">Модель OpenAI (необязательно)</label>
+            <select id="openai_model" name="openai_model">
+              <option value="">(по умолчанию из окружения)</option>
+              <option value="gpt-4o-mini">gpt-4o-mini</option>
+              <option value="gpt-4o">gpt-4o</option>
+              <option value="o3-mini">o3-mini</option>
+              <option value="o4-mini">o4-mini</option>
+            </select>
+            <small class="help">Можно оставить пустым — возьмётся из <code>OPENAI_MODEL</code> или дефолтной модели.</small>
+          </div>
+        </div>
+
+        <button type="submit" class="image-button" aria-label="Запустить анализ">
+          <img src="/identity/startanalysis.png" alt="Start Analysis">
+        </button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,47 @@
+﻿# Python cache/build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets and local credentials
+.env
+*.env
+*.session
+*.session-journal
+app/ключи.docx
+
+# Runtime logs and generated analysis outputs
+*.log
+app/logs/
+app/Clipchecker_materials/
+**/Clipchecker_materials/
+**/frames/
+**/frames_pdf_original/
+**/faces/
+**/chat_uploads/
+
+# Local historical snapshots / manual backups
+app/текущий run/
+app/T-one-main/
+
+# Vendored binaries; install/provide ffmpeg separately
+ffmpeg/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
