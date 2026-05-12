@@ -8,7 +8,14 @@ from pathlib import Path
 from PIL import Image
 
 from app.approval_checks import evaluate_approval_view_model
-from app.frame_safety import analyze_frame_safety, classify_substantial_text, evaluate_frame_safety
+from app.frame_safety import (
+    analyze_frame_safety,
+    classify_substantial_text,
+    evaluate_all_text_safety,
+    evaluate_frame_safety,
+    evaluate_legal_disclaimer_safety,
+    evaluate_logo_safety,
+)
 
 
 def make_ocr_line(text: str, box: tuple[int, int, int, int]) -> dict:
@@ -51,12 +58,46 @@ def make_ocr_log(text: str, box: tuple[int, int, int, int], frame_name: str = "f
     }
 
 
+def make_ocr_log_many(items: list[tuple[str, tuple[int, int, int, int], str]]) -> dict:
+    data: dict = {}
+    for text, box, frame_name in items:
+        data.setdefault(
+            frame_name,
+            {
+                "results": [
+                    {
+                        "results": [
+                            {
+                                "textDetection": {
+                                    "pages": [
+                                        {
+                                            "blocks": [
+                                                {
+                                                    "lines": [],
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                ]
+            },
+        )
+        data[frame_name]["results"][0]["results"][0]["textDetection"]["pages"][0]["blocks"][0]["lines"].append(
+            make_ocr_line(text, box)
+        )
+    return data
+
+
 def make_result_dir(ocr_log: dict):
     tmp = tempfile.TemporaryDirectory()
     base = Path(tmp.name)
     frames = base / "frames"
     frames.mkdir()
-    Image.new("RGB", (1000, 500), "white").save(frames / "frame_001.jpg")
+    for frame_name in ocr_log:
+        Image.new("RGB", (1000, 500), "white").save(frames / frame_name)
     (base / "OCR_Log.json").write_text(json.dumps(ocr_log, ensure_ascii=False), encoding="utf-8")
     return tmp, base
 
@@ -94,7 +135,7 @@ class FrameSafetyTests(unittest.TestCase):
         self.assertIn("SOKOLOV", result["message"])
 
     def test_evaluates_item_id_3_inside_view_model(self):
-        tmp, base = make_result_dir(make_ocr_log("Цена 1 999 руб.", (120, 40, 300, 80)))
+        tmp, base = make_result_dir(make_ocr_log("Рекламодатель ООО Ромашка, ОГРН 1234567890", (120, 400, 700, 430)))
         view_model = {
             "ok": True,
             "blocks": [
@@ -107,6 +148,71 @@ class FrameSafetyTests(unittest.TestCase):
             tmp.cleanup()
 
         self.assertEqual(evaluated["blocks"][0]["items"][0]["status"], "pass")
+
+    def test_legal_disclaimer_scope_ignores_top_logo(self):
+        tmp, base = make_result_dir(
+            make_ocr_log_many(
+                [
+                    ("SOKOLOV", (20, 40, 90, 80), "frame_001.jpg"),
+                    ("Рекламодатель ООО Ромашка, ОГРН 1234567890", (120, 400, 700, 430), "frame_001.jpg"),
+                ]
+            )
+        )
+        try:
+            result = evaluate_legal_disclaimer_safety(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["checked_count"], 1)
+
+    def test_legal_disclaimer_scope_fails_for_bottom_legal_text_outside_frame(self):
+        tmp, base = make_result_dir(make_ocr_log("Рекламодатель ООО Ромашка, ОГРН 1234567890", (20, 400, 700, 430)))
+        try:
+            result = evaluate_legal_disclaimer_safety(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("Рекламодатель", result["message"])
+
+    def test_logo_scope_uses_repeated_short_brand_text(self):
+        tmp, base = make_result_dir(
+            make_ocr_log_many(
+                [
+                    ("SOKOLOV", (20, 40, 90, 80), "frame_001.jpg"),
+                    ("SOKOLOV", (20, 40, 90, 80), "frame_002.jpg"),
+                    ("НА ВСЕ", (20, 120, 90, 150), "frame_001.jpg"),
+                ]
+            )
+        )
+        try:
+            result = evaluate_logo_safety(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["checked_count"], 2)
+        self.assertIn("SOKOLOV", result["message"])
+
+    def test_all_text_scope_checks_price_age_and_legal_text(self):
+        tmp, base = make_result_dir(
+            make_ocr_log_many(
+                [
+                    ("18+", (850, 40, 890, 80), "frame_001.jpg"),
+                    ("Цена 1 999 руб.", (20, 100, 200, 130), "frame_001.jpg"),
+                    ("Рекламодатель ООО Ромашка, ОГРН 1234567890", (120, 400, 700, 430), "frame_001.jpg"),
+                ]
+            )
+        )
+        try:
+            result = evaluate_all_text_safety(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["checked_count"], 3)
+        self.assertIn("Цена 1 999 руб.", result["message"])
 
 
 if __name__ == "__main__":

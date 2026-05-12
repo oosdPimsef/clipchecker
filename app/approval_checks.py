@@ -7,9 +7,9 @@ import re
 from pathlib import Path
 
 try:
-    from frame_safety import evaluate_frame_safety
+    from frame_safety import evaluate_all_text_safety, evaluate_legal_disclaimer_safety, evaluate_logo_safety
 except ImportError:
-    from .frame_safety import evaluate_frame_safety
+    from .frame_safety import evaluate_all_text_safety, evaluate_legal_disclaimer_safety, evaluate_logo_safety
 
 
 def _count_frame_seconds(result_dir: str | Path) -> int | None:
@@ -171,7 +171,9 @@ def evaluate_booking_form_duration_matches_video(result_dir: str | Path) -> dict
 EVALUATORS = {
     "1": evaluate_duration_multiple_of_five,
     "2": evaluate_booking_form_duration_matches_video,
-    "3": evaluate_frame_safety,
+    "3": evaluate_legal_disclaimer_safety,
+    "4": evaluate_logo_safety,
+    "5": evaluate_all_text_safety,
 }
 
 
