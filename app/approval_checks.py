@@ -79,28 +79,44 @@ def _is_booking_form_document(title: str, text: str) -> bool:
 
 def _extract_duration_from_booking_form(text: str) -> int | None:
     normalized = text.lower().replace("ё", "е")
+    duration_label = r"(?:длительность|продолжительность|хронометраж|хрон[-\s]*ж)"
+    seconds_unit = r"(?:сек|с\.|секунд[а-я]*)"
 
-    time_match = re.search(r"\b(?:[01]?\d|2[0-3]):([0-5]\d):([0-5]\d)\b", normalized)
-    if time_match:
-        return int(time_match.group(1)) * 60 + int(time_match.group(2))
-
-    minute_second_match = re.search(
-        r"\b(\d{1,2})\s*(?:мин|минут[а-я]*)\s*(\d{1,2})\s*(?:сек|секунд[а-я]*)\b",
+    keyword_minute_second_match = re.search(
+        rf"{duration_label}[^\d]{{0,80}}(\d{{1,2}})\s*(?:мин|минут[а-я]*)\s*(\d{{1,2}})\s*{seconds_unit}",
         normalized,
     )
-    if minute_second_match:
-        return int(minute_second_match.group(1)) * 60 + int(minute_second_match.group(2))
+    if keyword_minute_second_match:
+        return int(keyword_minute_second_match.group(1)) * 60 + int(keyword_minute_second_match.group(2))
+
+    keyword_time_match = re.search(
+        rf"{duration_label}[^\d]{{0,80}}(?:[01]?\d|2[0-3]):([0-5]\d):([0-5]\d)\b",
+        normalized,
+    )
+    if keyword_time_match:
+        return int(keyword_time_match.group(1)) * 60 + int(keyword_time_match.group(2))
 
     keyword_match = re.search(
-        r"(?:длительность|продолжительность|хронометраж|хрон[-\s]*ж)[^\d]{0,40}(\d{1,4})\s*(?:сек|с\.|секунд[а-я]*)?",
+        rf"{duration_label}[^\d]{{0,80}}(\d{{1,4}})\s*{seconds_unit}?",
         normalized,
     )
     if keyword_match:
         return int(keyword_match.group(1))
 
-    seconds_match = re.search(r"\b(\d{1,4})\s*(?:сек|с\.|секунд[а-я]*)\b", normalized)
+    minute_second_match = re.search(
+        rf"\b(\d{{1,2}})\s*(?:мин|минут[а-я]*)\s*(\d{{1,2}})\s*{seconds_unit}\b",
+        normalized,
+    )
+    if minute_second_match:
+        return int(minute_second_match.group(1)) * 60 + int(minute_second_match.group(2))
+
+    seconds_match = re.search(rf"\b(\d{{1,4}})\s*{seconds_unit}\b", normalized)
     if seconds_match:
         return int(seconds_match.group(1))
+
+    time_match = re.search(r"\b(?:[01]?\d|2[0-3]):([0-5]\d):([0-5]\d)\b", normalized)
+    if time_match:
+        return int(time_match.group(1)) * 60 + int(time_match.group(2))
 
     return None
 

@@ -122,6 +122,25 @@ class ApprovalChecksTests(unittest.TestCase):
         self.assertEqual(result["booking_duration_sec"], 5)
         self.assertEqual(result["booking_form_title"], "БЗ_гп.(5с)_гендеры.docx")
 
+    def test_booking_form_duration_prefers_duration_field_over_timecode(self):
+        tmp, base = make_result_dir(5)
+        write_documents_text(
+            base,
+            (
+                "Документ 1. БЗ_гп.(5с)_гендеры.docx\n"
+                "СВЕДЕНИЯ ОБ ИСПОЛЬЗОВАНИИ ПРОИЗВЕДЕНИЙ\n"
+                "Продолжительность ролика | 5 сек. "
+                "Тайм-код ролика на кассете | Начало 00:00:00:00 | Конец 00:00:00:00"
+            ),
+        )
+        try:
+            result = evaluate_booking_form_duration_matches_video(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["booking_duration_sec"], 5)
+
     def test_booking_form_duration_mismatch_fails(self):
         tmp, base = make_result_dir(15)
         write_documents_text(base, "Документ 1. БЗ.docx\nДлительность 20 секунд.")
