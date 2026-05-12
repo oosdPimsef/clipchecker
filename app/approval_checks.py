@@ -8,8 +8,10 @@ from pathlib import Path
 
 try:
     from frame_safety import evaluate_all_text_safety, evaluate_legal_disclaimer_safety, evaluate_logo_safety
+    from grammar_checks import evaluate_legal_disclaimer_grammar, evaluate_non_legal_grammar
 except ImportError:
     from .frame_safety import evaluate_all_text_safety, evaluate_legal_disclaimer_safety, evaluate_logo_safety
+    from .grammar_checks import evaluate_legal_disclaimer_grammar, evaluate_non_legal_grammar
 
 
 def _count_frame_seconds(result_dir: str | Path) -> int | None:
@@ -174,6 +176,8 @@ EVALUATORS = {
     "3": evaluate_legal_disclaimer_safety,
     "4": evaluate_logo_safety,
     "5": evaluate_all_text_safety,
+    "6": evaluate_non_legal_grammar,
+    "7": evaluate_legal_disclaimer_grammar,
 }
 
 
