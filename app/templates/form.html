@@ -106,6 +106,16 @@
           </div>
 
           <div>
+            <label for="approval_category">Категория рекламодателя</label>
+            <select id="approval_category" name="approval_category" required>
+              {% for category in approval_categories %}
+                <option value="{{ category }}">{{ category }}</option>
+              {% endfor %}
+            </select>
+            <small class="help">Список берётся из файла <code>1. Карта согласования РМ.xlsx</code>.</small>
+          </div>
+
+          <div>
             <label for="openai_model">Модель OpenAI (необязательно)</label>
             <select id="openai_model" name="openai_model">
               <option value="">(по умолчанию из окружения)</option>

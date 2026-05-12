@@ -3416,11 +3416,16 @@ if __name__ == "__main__":
 
     # 2) Последовательность шагов по вашему ТЗ:
 
-    # 2.1) YandexGPT (результат в Comprehensive_Legal_Review.txt
-    #      при ошибке туда же пишется код + расшифровка)
-    run_yagpt_safe(result_dir)
-    # 2.2) Пинг YandexGPT (результат или ошибка в OpenAI_Connectivity_Test.txt)
-    run_yandex_connectivity_test(result_dir)
+    # 2.1) YandexGPT временно отключён. Включение: ENABLE_YANDEXGPT=1.
+    if os.getenv("ENABLE_YANDEXGPT", "").strip().lower() in {"1", "true", "yes", "on"}:
+        run_yagpt_safe(result_dir)
+        run_yandex_connectivity_test(result_dir)
+    else:
+        msg = "YandexGPT временно отключён. Для включения задайте ENABLE_YANDEXGPT=1."
+        _write_text(os.path.join(result_dir, "Comprehensive_Legal_Review.txt"), msg)
+        _write_text(os.path.join(result_dir, "YandexGPT_Connectivity_Test.txt"), msg)
+        _write_json(os.path.join(result_dir, "YandexGPT_Connectivity_Log.json"), {"ok": False, "disabled": True})
+        print(f"⏭ {msg}")
 
     # 2.2) Пинг OpenAI (результат или ошибка в OpenAI_Connectivity_Test.txt)
     run_openai_connectivity_test_safe(result_dir)

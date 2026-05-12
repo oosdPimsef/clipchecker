@@ -10,6 +10,7 @@ from markupsafe import Markup
 import html
 from datetime import date, datetime
 from pathlib import Path
+from approval_map import build_approval_view_model, load_approval_categories
 
 app = Flask(__name__, static_url_path='/static', static_folder='.')
 
@@ -450,6 +451,9 @@ def _collect_results_for_template(preview_path: str):
     if results.get("openai_review"):
         results["openai_review"] = Markup(_sanitize_model_text(results["openai_review"], highlight_risk=True))
 
+    approval_category = os.environ.get("APPROVAL_CATEGORY", "")
+    results["approval"] = build_approval_view_model(approval_category)
+
     results.update(_collect_usage_status(preview_path))
     return results
 
@@ -468,11 +472,13 @@ def index():
             preview_path   = request.form['preview']
             docs_path      = request.form['docs']
             broadcast_path = request.form['broadcast']
+            approval_category = request.form.get('approval_category', '').strip()
             openai_model   = request.form.get('openai_model', '').strip()
 
             os.environ['PREVIEW_PATH']   = preview_path
             os.environ['DOCUMENTS_PATH'] = docs_path
             os.environ['BROADCAST_PATH'] = broadcast_path
+            os.environ['APPROVAL_CATEGORY'] = approval_category
             if openai_model:
                 os.environ['OPENAI_MODEL'] = openai_model
 
@@ -481,7 +487,7 @@ def index():
             return render_template("result.html", **results)
         except Exception as e:
             return f"<h2>❌ Ошибка при обработке:</h2><pre>{e}</pre>"
-    return render_template("form.html")
+    return render_template("form.html", approval_categories=load_approval_categories())
 
 @app.route("/pdf")
 def serve_pdf():
