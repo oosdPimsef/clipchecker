@@ -13,8 +13,10 @@ from app.price_checks import (
     NO_PRICE_MESSAGE,
     evaluate_document_prices_match_video,
     evaluate_ruble_prices,
+    analyze_document_prices,
     extract_document_prices,
     extract_ruble_prices,
+    is_price_letter_title,
     normalize_price_value,
 )
 
@@ -86,6 +88,7 @@ class PriceChecksTests(unittest.TestCase):
         self.assertEqual(extract_ruble_prices("Цена 1 999 руб."), ["1 999 руб."])
         self.assertEqual(extract_ruble_prices("Стоимость 1999 ₽"), ["1999 ₽"])
         self.assertEqual(extract_ruble_prices("Цена 2 500 р."), ["2 500 р."])
+        self.assertEqual(extract_ruble_prices("установлено в размере 49 990 (сорок девять тысяч девятьсот девяносто) рублей"), ["49 990 рублей"])
         self.assertEqual(extract_ruble_prices("г. Москва, стр. 1, ОГРН 123456"), [])
         self.assertEqual(normalize_price_value("1 999 руб."), "1999")
         self.assertEqual(normalize_price_value("1999 ₽"), "1999")
@@ -99,6 +102,24 @@ class PriceChecksTests(unittest.TestCase):
         prices = extract_document_prices(text)
 
         self.assertEqual([item["price"] for item in prices], ["1 999 рублей"])
+
+    def test_price_letter_title_has_priority(self):
+        documents_text = (
+            "Документ 1. Доверенность.docx\n"
+            "Доверенность на совершение договоров стоимостью не более 10 000 рублей.\n\n"
+            "Документ 2. Письмо о ценах.docx\n"
+            "Ценовое предложение на изделие, артикул 9010269-3-5, установлено в размере "
+            "49 990 (сорок девять тысяч девятьсот девяносто) рублей.\n"
+            "Ценовое предложение на изделие, артикул 019686-3, установлено в размере "
+            "9 990 (девять тысяч девятьсот девяносто) рублей.\n"
+        )
+
+        result = analyze_document_prices(documents_text)
+
+        self.assertTrue(is_price_letter_title("Письмо о ценах.docx"))
+        self.assertTrue(result["searched_price_letter_first"])
+        self.assertEqual(result["document_price_values"], ["49990", "9990"])
+        self.assertEqual(result["document_price_source_titles"], ["Письмо о ценах.docx"])
 
     def test_evaluate_ruble_prices_outputs_large_red_html(self):
         tmp, base = make_result_dir(make_ocr_log(["Цена 1 999 руб.", "Реклама"]))

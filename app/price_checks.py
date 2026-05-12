@@ -35,12 +35,16 @@ PRICE_RE = re.compile(
     r"(?<![\w])"
     r"(?P<amount>\d{1,3}(?:[\s\u00a0]\d{3})*(?:[,.]\d{1,2})?|\d+(?:[,.]\d{1,2})?)"
     r"\s*"
+    r"(?:\([^)]{3,120}\)\s*)?"
     r"(?P<currency>₽|руб(?:\.|лей|ля|ль|лю|лями)?|р\.)",
     flags=re.IGNORECASE,
 )
 PRICE_CONTEXT_RE = re.compile(
     r"(?:цена|стоимость|стоимость\s+товар[а-я]*|цена\s+товар[а-я]*|розничн[а-я]*\s+цен[а-я]*|"
-    r"акционн[а-я]*\s+цен[а-я]*|по\s+цен[еуы]|прода[её]тся\s+по|составляет|руб(?:\.|лей|ля|ль|лю|лями)?)",
+    r"акционн[а-я]*\s+цен[а-я]*|ценов[а-я]*\s+предложен[а-я]*|по\s+цен[еуы]|прода[её]тся\s+по|"
+    r"составляет|установлен[а-я]*\s+в\s+размере|в\s+размере|размер\s+цен[а-я]*|"
+    r"товар\s+стоит|изделие|артикул|прайс|прайс[-\s]*лист|тариф|"
+    r"руб(?:\.|лей|ля|ль|лю|лями)?)",
     flags=re.IGNORECASE,
 )
 NON_PRODUCT_PRICE_CONTEXT_RE = re.compile(
@@ -63,10 +67,14 @@ def normalize_price_value(price: str) -> str:
     return amount
 
 
+def _price_from_match(match: re.Match) -> str:
+    return normalize_price(f"{match.group('amount')} {match.group('currency')}")
+
+
 def extract_ruble_prices(text: str) -> list[str]:
     prices = []
     for match in PRICE_RE.finditer(text or ""):
-        prices.append(normalize_price(match.group(0)))
+        prices.append(_price_from_match(match))
     return prices
 
 
@@ -161,7 +169,7 @@ def extract_document_prices(text: str) -> list[dict]:
             continue
         if NON_PRODUCT_PRICE_CONTEXT_RE.search(_price_before_context(text, match.start())):
             continue
-        price = normalize_price(match.group(0))
+        price = _price_from_match(match)
         found.append(
             {
                 "price": price,
@@ -172,25 +180,64 @@ def extract_document_prices(text: str) -> list[dict]:
     return found
 
 
+def split_document_sections(documents_text: str) -> list[tuple[str, str]]:
+    matches = list(re.finditer(r"(?m)^Документ\s+\d+\.\s*(.+?)\s*$", documents_text or ""))
+    if not matches:
+        return [("", documents_text)] if (documents_text or "").strip() else []
+
+    sections = []
+    for idx, match in enumerate(matches):
+        start = match.start()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(documents_text)
+        sections.append((match.group(1).strip(), documents_text[start:end]))
+    return sections
+
+
+def is_price_letter_title(title: str) -> bool:
+    normalized = (title or "").lower().replace("ё", "е")
+    return bool(
+        re.search(
+            r"(?:письм[оа]?|справк[а-я]*|подтверждени[а-я]*|гарантийн[а-я]*)[^\n]{0,80}"
+            r"(?:цен|стоимост|прайс|price|ценов[а-я]*\s+предложен[а-я]*)",
+            normalized,
+        )
+        or re.search(r"(?:цен|стоимост|прайс|price|ценов[а-я]*\s+предложен[а-я]*)", normalized)
+    )
+
+
 def analyze_document_prices(documents_text: str) -> dict:
+    sections = split_document_sections(documents_text)
+    price_sections = [(title, text) for title, text in sections if is_price_letter_title(title)]
+    search_sections = price_sections or sections or [("", documents_text)]
+
     grouped: dict[str, dict] = {}
     total = 0
-    for item in extract_document_prices(documents_text):
-        total += 1
-        key = item["normalized_value"]
-        if key not in grouped:
-            grouped[key] = {
-                "price": item["price"],
-                "normalized_value": item["normalized_value"],
-                "contexts": [],
-            }
-        if len(grouped[key]["contexts"]) < 3:
-            grouped[key]["contexts"].append(item["context"])
+    source_titles = []
+    for title, section_text in search_sections:
+        section_prices = extract_document_prices(section_text)
+        if section_prices and title:
+            source_titles.append(title)
+        for item in section_prices:
+            total += 1
+            key = item["normalized_value"]
+            if key not in grouped:
+                grouped[key] = {
+                    "price": item["price"],
+                    "normalized_value": item["normalized_value"],
+                    "contexts": [],
+                    "source_titles": [],
+                }
+            if title and title not in grouped[key]["source_titles"]:
+                grouped[key]["source_titles"].append(title)
+            if len(grouped[key]["contexts"]) < 3:
+                grouped[key]["contexts"].append(item["context"])
 
     return {
         "document_price_count": total,
         "document_prices": list(grouped.values()),
         "document_price_values": sorted(grouped.keys()),
+        "document_price_source_titles": sorted(set(source_titles)),
+        "searched_price_letter_first": bool(price_sections),
     }
 
 
