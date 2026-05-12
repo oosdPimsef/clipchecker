@@ -7,10 +7,12 @@ import re
 from pathlib import Path
 
 try:
+    from black_bars import evaluate_black_side_bars
     from frame_safety import evaluate_all_text_safety, evaluate_legal_disclaimer_safety, evaluate_logo_safety
     from foreign_words import evaluate_foreign_words
     from grammar_checks import evaluate_legal_disclaimer_grammar, evaluate_non_legal_grammar
 except ImportError:
+    from .black_bars import evaluate_black_side_bars
     from .frame_safety import evaluate_all_text_safety, evaluate_legal_disclaimer_safety, evaluate_logo_safety
     from .foreign_words import evaluate_foreign_words
     from .grammar_checks import evaluate_legal_disclaimer_grammar, evaluate_non_legal_grammar
@@ -181,6 +183,7 @@ EVALUATORS = {
     "6": evaluate_non_legal_grammar,
     "7": evaluate_legal_disclaimer_grammar,
     "8": evaluate_foreign_words,
+    "9": evaluate_black_side_bars,
 }
 
 
