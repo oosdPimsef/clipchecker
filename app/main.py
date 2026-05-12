@@ -10,6 +10,7 @@ from markupsafe import Markup
 import html
 from datetime import date, datetime
 from pathlib import Path
+from approval_checks import evaluate_approval_view_model
 from approval_map import build_approval_view_model, load_approval_categories
 
 app = Flask(__name__, static_url_path='/static', static_folder='.')
@@ -452,7 +453,10 @@ def _collect_results_for_template(preview_path: str):
         results["openai_review"] = Markup(_sanitize_model_text(results["openai_review"], highlight_risk=True))
 
     approval_category = os.environ.get("APPROVAL_CATEGORY", "")
-    results["approval"] = build_approval_view_model(approval_category)
+    results["approval"] = evaluate_approval_view_model(
+        build_approval_view_model(approval_category),
+        result_dir,
+    )
 
     results.update(_collect_usage_status(preview_path))
     return results

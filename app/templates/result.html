@@ -167,6 +167,11 @@
     .approval-num{font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
     .approval-text{min-width:0}
     .approval-status{display:inline-block;margin-top:4px;color:var(--muted);font-size:12px}
+    .approval-line{display:flex;gap:8px;align-items:flex-start}
+    .approval-dot{width:11px;height:11px;border-radius:50%;margin-top:4px;flex:0 0 11px;background:#9ca3af}
+    .approval-dot.pass{background:#2ea043}
+    .approval-dot.fail{background:#ef4444}
+    .approval-dot.pending{background:#9ca3af}
     @media (max-width:600px){.approval-item{grid-template-columns:1fr}.approval-num{font-size:12px}}
 
   </style>
@@ -294,7 +299,10 @@
                 {% for item in block["items"] %}
                   <li class="approval-item">
                     <span class="approval-num">ID {{ item.id or item.number }}</span>
-                    <span class="approval-text">{{ item.text }}<br><span class="approval-status">Оценка Python: будет добавлена на следующем этапе</span></span>
+                    <span class="approval-line">
+                      <span class="approval-dot {{ item.status }}" title="{{ item.status }}"></span>
+                      <span class="approval-text">{{ item.text }}<br><span class="approval-status">{{ item.message }}</span></span>
+                    </span>
                   </li>
                 {% endfor %}
               </ol>
