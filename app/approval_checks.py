@@ -8,9 +8,11 @@ from pathlib import Path
 
 try:
     from frame_safety import evaluate_all_text_safety, evaluate_legal_disclaimer_safety, evaluate_logo_safety
+    from foreign_words import evaluate_foreign_words
     from grammar_checks import evaluate_legal_disclaimer_grammar, evaluate_non_legal_grammar
 except ImportError:
     from .frame_safety import evaluate_all_text_safety, evaluate_legal_disclaimer_safety, evaluate_logo_safety
+    from .foreign_words import evaluate_foreign_words
     from .grammar_checks import evaluate_legal_disclaimer_grammar, evaluate_non_legal_grammar
 
 
@@ -178,6 +180,7 @@ EVALUATORS = {
     "5": evaluate_all_text_safety,
     "6": evaluate_non_legal_grammar,
     "7": evaluate_legal_disclaimer_grammar,
+    "8": evaluate_foreign_words,
 }
 
 
@@ -196,6 +199,8 @@ def evaluate_approval_view_model(view_model: dict, result_dir: str | Path) -> di
             result = evaluator(result_dir)
             item["status"] = result.get("status", "pending")
             item["message"] = result.get("message", "")
-            item["details"] = {k: v for k, v in result.items() if k not in {"status", "message"}}
+            if result.get("message_html"):
+                item["message_html"] = result["message_html"]
+            item["details"] = {k: v for k, v in result.items() if k not in {"status", "message", "message_html"}}
 
     return view_model

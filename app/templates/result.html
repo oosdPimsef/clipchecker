@@ -171,7 +171,9 @@
     .approval-dot{width:11px;height:11px;border-radius:50%;margin-top:4px;flex:0 0 11px;background:#9ca3af}
     .approval-dot.pass{background:#2ea043}
     .approval-dot.fail{background:#ef4444}
+    .approval-dot.warning{background:#f59e0b}
     .approval-dot.pending{background:#9ca3af}
+    .foreign-word{color:#dc2626;font-weight:700}
     @media (max-width:600px){.approval-item{grid-template-columns:1fr}.approval-num{font-size:12px}}
 
   </style>
@@ -301,7 +303,7 @@
                     <span class="approval-num">ID {{ item.id or item.number }}</span>
                     <span class="approval-line">
                       <span class="approval-dot {{ item.status }}" title="{{ item.status }}"></span>
-                      <span class="approval-text">{{ item.text }}<br><span class="approval-status">{{ item.message }}</span></span>
+                      <span class="approval-text">{{ item.text }}<br><span class="approval-status">{% if item.message_html %}{{ item.message_html|safe }}{% else %}{{ item.message }}{% endif %}</span></span>
                     </span>
                   </li>
                 {% endfor %}
