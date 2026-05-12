@@ -11,11 +11,13 @@ try:
     from frame_safety import evaluate_all_text_safety, evaluate_legal_disclaimer_safety, evaluate_logo_safety
     from foreign_words import evaluate_foreign_words
     from grammar_checks import evaluate_legal_disclaimer_grammar, evaluate_non_legal_grammar
+    from price_checks import evaluate_ruble_prices
 except ImportError:
     from .black_bars import evaluate_black_side_bars
     from .frame_safety import evaluate_all_text_safety, evaluate_legal_disclaimer_safety, evaluate_logo_safety
     from .foreign_words import evaluate_foreign_words
     from .grammar_checks import evaluate_legal_disclaimer_grammar, evaluate_non_legal_grammar
+    from .price_checks import evaluate_ruble_prices
 
 
 def _count_frame_seconds(result_dir: str | Path) -> int | None:
@@ -184,6 +186,7 @@ EVALUATORS = {
     "7": evaluate_legal_disclaimer_grammar,
     "8": evaluate_foreign_words,
     "9": evaluate_black_side_bars,
+    "10": evaluate_ruble_prices,
 }
 
 
