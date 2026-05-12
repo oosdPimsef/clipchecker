@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import re
-from collections import defaultdict
 from pathlib import Path
 
 try:
@@ -87,6 +86,17 @@ def tokenize_words(text: str) -> list[str]:
     return re.findall(r"[A-Za-zА-Яа-яЁё]+(?:[-'][A-Za-zА-Яа-яЁё]+)?", text or "")
 
 
+def find_abbreviation_notes(text: str) -> list[str]:
+    notes: list[str] = []
+    for match in re.finditer(r"\b[А-Яа-яЁёA-Za-z]{1,4}\.", text or ""):
+        notes.append(match.group(0))
+    for word in tokenize_words(text):
+        normalized = _normalized_word(word)
+        if "-" in word and len(normalized) >= 3:
+            notes.append(word)
+    return notes
+
+
 def _has_cyrillic(word: str) -> bool:
     return bool(re.search(r"[А-Яа-яЁё]", word))
 
@@ -161,10 +171,20 @@ def analyze_grammar(ocr_data: dict, frames_dir: str | Path, scope: str) -> dict:
     frames_base = Path(frames_dir)
     checked_words = 0
     issues = []
+    recommendation_notes = []
 
     for item in iter_ocr_lines(ocr_data):
         if not _matches_scope(item, frames_base, scope):
             continue
+        for note in find_abbreviation_notes(item["text"]):
+            recommendation_notes.append(
+                {
+                    "word": note,
+                    "text": item["text"],
+                    "frame": item["frame"],
+                    "second": frame_second_label(item["frame"]),
+                }
+            )
         for word in tokenize_words(item["text"]):
             checked_words += 1
             issue = check_word(word)
@@ -198,10 +218,31 @@ def analyze_grammar(ocr_data: dict, frames_dir: str | Path, scope: str) -> dict:
         issue["seconds"] = sorted(set(issue["seconds"]), key=lambda value: int(re.search(r"\d+", value).group(0)) if re.search(r"\d+", value) else 0)
         issue["frames"] = sorted(set(issue["frames"]))
 
+    grouped_notes = {}
+    for note in recommendation_notes:
+        key = _normalized_word(note["word"])
+        if key not in grouped_notes:
+            grouped_notes[key] = {
+                "word": note["word"],
+                "seconds": [],
+                "frames": [],
+                "examples": [],
+            }
+        grouped_notes[key]["seconds"].append(note["second"])
+        grouped_notes[key]["frames"].append(note["frame"])
+        if len(grouped_notes[key]["examples"]) < 2:
+            grouped_notes[key]["examples"].append(normalize_text(note["text"]))
+
+    for note in grouped_notes.values():
+        note["seconds"] = sorted(set(note["seconds"]), key=lambda value: int(re.search(r"\d+", value).group(0)) if re.search(r"\d+", value) else 0)
+        note["frames"] = sorted(set(note["frames"]))
+
     return {
         "checked_words": checked_words,
         "issue_count": len(issues),
         "issues": list(grouped.values()),
+        "recommendation_count": len(recommendation_notes),
+        "recommendations": list(grouped_notes.values()),
         "scope": scope,
     }
 
@@ -238,21 +279,40 @@ def evaluate_grammar(result_dir: str | Path, scope: str) -> dict:
         }
 
     if analysis["issue_count"] == 0:
+        recommendation = _build_recommendation_text(analysis)
+        message = f"Группа «{label}»: явные орфографические/OCR-ошибки не найдены. Проверено слов: {analysis['checked_words']}."
+        if recommendation:
+            message += f" Рекомендация: {recommendation}"
         return {
             "status": "pass",
-            "message": f"Группа «{label}»: явные орфографические/OCR-ошибки не найдены. Проверено слов: {analysis['checked_words']}.",
+            "message": message,
             **analysis,
         }
 
     preview = []
     for issue in analysis["issues"][:4]:
         preview.append(f"{issue['word']} - {issue['issue']} ({', '.join(issue['seconds'][:4])})")
+    recommendation = _build_recommendation_text(analysis)
+    message = f"Группа «{label}»: найдены возможные ошибки: {'; '.join(preview)}."
+    if recommendation:
+        message += f" Рекомендация: {recommendation}"
 
     return {
         "status": "fail",
-        "message": f"Группа «{label}»: найдены возможные ошибки: {'; '.join(preview)}.",
+        "message": message,
         **analysis,
     }
+
+
+def _build_recommendation_text(analysis: dict) -> str:
+    notes = analysis.get("recommendations") or []
+    if not notes:
+        return ""
+    preview = []
+    for note in notes[:5]:
+        seconds = ", ".join(note["seconds"][:3])
+        preview.append(f"{note['word']} ({seconds})")
+    return f"вручную проверьте сокращения и написания через дефис: {'; '.join(preview)}."
 
 
 def evaluate_non_legal_grammar(result_dir: str | Path) -> dict:

@@ -12,6 +12,7 @@ from app.grammar_checks import (
     check_word,
     evaluate_legal_disclaimer_grammar,
     evaluate_non_legal_grammar,
+    find_abbreviation_notes,
 )
 
 
@@ -82,6 +83,13 @@ class GrammarChecksTests(unittest.TestCase):
         self.assertIn("информация", check_word("инфоормация")["issue"])
         self.assertIn("повторение", check_word("скидкаааа")["issue"])
 
+    def test_abbreviations_and_hyphenated_words_become_recommendations(self):
+        notes = find_abbreviation_notes("г. Москва, пр-зд Серебрякова, стр. 1")
+
+        self.assertIn("г.", notes)
+        self.assertIn("пр-зд", notes)
+        self.assertIn("стр.", notes)
+
     def test_non_legal_grammar_checks_only_words_outside_disclaimer(self):
         tmp, base = make_result_dir(
             make_ocr_log(
@@ -115,6 +123,23 @@ class GrammarChecksTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "fail")
         self.assertIn("Рекламодателль", result["message"])
+
+    def test_abbreviations_do_not_fail_but_are_in_recommendation(self):
+        tmp, base = make_result_dir(
+            make_ocr_log(
+                [
+                    ("Рекламодатель ООО Ромашка, г. Москва, пр-зд Серебрякова, стр. 1", (120, 400, 820, 430), "frame_001.jpg"),
+                ]
+            )
+        )
+        try:
+            result = evaluate_legal_disclaimer_grammar(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertIn("Рекомендация", result["message"])
+        self.assertIn("пр-зд", result["message"])
 
     def test_grammar_ids_6_and_7_inside_view_model(self):
         tmp, base = make_result_dir(
