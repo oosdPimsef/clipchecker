@@ -16,11 +16,11 @@ import face_recognition
 import numpy as np
 import cv2
 import shutil
-import docx
 import PyPDF2
 from pyrogram import Client
 import asyncio
 from vision_ocr import recognize_image_file
+from document_text import clean_to_single_block, extract_docx_text
 
 # ====== Error helpers: код -> расшифровка и запись в файл ======
 import traceback
@@ -954,7 +954,6 @@ def write_overlay_report(ocr_log_path, frames_dir, output_path):
             f.write("\n" + "-" * 60 + "\n\n")
 
 # 📄 Извлечение текста из документов с fallback через Yandex Vision
-import docx
 import pdfplumber
 import re
 import base64
@@ -1009,9 +1008,8 @@ def extract_text_from_document(filepath):
                     method = "PDF → JPEG (все страницы) → Yandex Vision"
                     return "\n".join(all_text).strip(), method
         elif ext == ".docx":
-            doc = docx.Document(filepath)
             method = "python-docx"
-            return "\n".join([para.text for para in doc.paragraphs]), method
+            return extract_docx_text(filepath), method
         elif ext == ".txt":
             with open(filepath, "r", encoding="utf-8") as f:
                 method = "txt/plain"
@@ -1024,13 +1022,6 @@ def extract_text_from_document(filepath):
             return "[Формат не поддерживается для автоматического извлечения текста]", method
     except Exception as e:
         return f"[Ошибка извлечения текста из {filepath}: {e}]", method
-
-def clean_to_single_block(text):
-    text = text.replace("\r", "")
-    text = re.sub(r"\n{3,}", "\n\n", text)              # 3+ \n → 2
-    text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)         # одиночные \n → пробел
-    text = re.sub(r"\n{2,}", "\n", text)                 # двойные → одиночные
-    return text.strip()
 
 # 📘 Формируем итоговый файл с текстами всех документов
 documents_text_path = os.path.join(result_dir, "Documents_Texts.txt")

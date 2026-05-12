@@ -72,6 +72,7 @@ def _is_booking_form_document(title: str, text: str) -> bool:
         r"\bбз\b",
         r"бланк\s*[-–—]?\s*заявк",
         r"бланк\s+заявк",
+        r"сведения\s+об\s+использовании\s+произведений",
     ]
     return any(re.search(pattern, haystack, flags=re.IGNORECASE) for pattern in patterns)
 

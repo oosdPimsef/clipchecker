@@ -101,6 +101,27 @@ class ApprovalChecksTests(unittest.TestCase):
         self.assertEqual(result["booking_duration_sec"], 15)
         self.assertIn("Длительность ролика 15 секунд", result["message"])
 
+    def test_booking_form_detected_by_usage_information_phrase(self):
+        tmp, base = make_result_dir(5)
+        write_documents_text(
+            base,
+            (
+                "Документ 1. БЗ_гп.(5с)_гендеры.docx\n"
+                "(обработано с помощью: python-docx)\n"
+                "СВЕДЕНИЯ ОБ ИСПОЛЬЗОВАНИИ ПРОИЗВЕДЕНИЙ РОССИЙСКИХ И ИНОСТРАННЫХ АВТОРОВ\n"
+                "Продолжительность ролика | 5 сек."
+            ),
+        )
+        try:
+            result = evaluate_booking_form_duration_matches_video(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["duration_sec"], 5)
+        self.assertEqual(result["booking_duration_sec"], 5)
+        self.assertEqual(result["booking_form_title"], "БЗ_гп.(5с)_гендеры.docx")
+
     def test_booking_form_duration_mismatch_fails(self):
         tmp, base = make_result_dir(15)
         write_documents_text(base, "Документ 1. БЗ.docx\nДлительность 20 секунд.")
