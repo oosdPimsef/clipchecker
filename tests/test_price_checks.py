@@ -5,8 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from PIL import Image
+
 from app.approval_checks import evaluate_approval_view_model
-from app.price_checks import NO_PRICE_MESSAGE, evaluate_ruble_prices, extract_ruble_prices
+from app.price_checks import NO_PRICE_MESSAGE, evaluate_ruble_prices, extract_ruble_prices, normalize_price_value
 
 
 def make_ocr_line(text: str, box: tuple[int, int, int, int] = (120, 80, 500, 120)) -> dict:
@@ -23,7 +25,15 @@ def make_ocr_line(text: str, box: tuple[int, int, int, int] = (120, 80, 500, 120
     }
 
 
-def make_ocr_log(lines: list[str]) -> dict:
+def make_ocr_log(lines: list[str | tuple[str, tuple[int, int, int, int]]]) -> dict:
+    ocr_lines = []
+    for item in lines:
+        if isinstance(item, tuple):
+            text, box = item
+        else:
+            text, box = item, (120, 80, 500, 120)
+        ocr_lines.append(make_ocr_line(text, box))
+
     return {
         "frame_001.jpg": {
             "results": [
@@ -35,7 +45,7 @@ def make_ocr_log(lines: list[str]) -> dict:
                                     {
                                         "blocks": [
                                             {
-                                                "lines": [make_ocr_line(line) for line in lines],
+                                                "lines": ocr_lines,
                                             }
                                         ]
                                     }
@@ -52,6 +62,9 @@ def make_ocr_log(lines: list[str]) -> dict:
 def make_result_dir(ocr_log: dict):
     tmp = tempfile.TemporaryDirectory()
     base = Path(tmp.name)
+    frames = base / "frames"
+    frames.mkdir()
+    Image.new("RGB", (1000, 500), "white").save(frames / "frame_001.jpg")
     (base / "OCR_Log.json").write_text(json.dumps(ocr_log, ensure_ascii=False), encoding="utf-8")
     return tmp, base
 
@@ -62,6 +75,8 @@ class PriceChecksTests(unittest.TestCase):
         self.assertEqual(extract_ruble_prices("Стоимость 1999 ₽"), ["1999 ₽"])
         self.assertEqual(extract_ruble_prices("Цена 2 500 р."), ["2 500 р."])
         self.assertEqual(extract_ruble_prices("г. Москва, стр. 1, ОГРН 123456"), [])
+        self.assertEqual(normalize_price_value("1 999 руб."), "1999")
+        self.assertEqual(normalize_price_value("1999 ₽"), "1999")
 
     def test_evaluate_ruble_prices_outputs_large_red_html(self):
         tmp, base = make_result_dir(make_ocr_log(["Цена 1 999 руб.", "Реклама"]))
@@ -74,15 +89,50 @@ class PriceChecksTests(unittest.TestCase):
         self.assertIn("1 999 руб.", result["message"])
         self.assertIn('<strong class="price-value">1 999 руб.</strong>', result["message_html"])
 
-    def test_evaluate_ruble_prices_fails_when_missing(self):
+    def test_evaluate_ruble_prices_passes_when_missing(self):
         tmp, base = make_result_dir(make_ocr_log(["Реклама без цены"]))
         try:
             result = evaluate_ruble_prices(base)
         finally:
             tmp.cleanup()
 
-        self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["status"], "pass")
         self.assertEqual(result["message"], NO_PRICE_MESSAGE)
+
+    def test_evaluate_ruble_prices_fails_when_frame_and_disclaimer_prices_mismatch(self):
+        tmp, base = make_result_dir(
+            make_ocr_log(
+                [
+                    ("Цена 1 999 руб.", (120, 80, 500, 120)),
+                    ("Рекламодатель ООО Ромашка, условия акции, цена 2 999 руб.", (120, 400, 820, 430)),
+                ]
+            )
+        )
+        try:
+            result = evaluate_ruble_prices(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "fail")
+        self.assertTrue(result["price_mismatch"])
+        self.assertIn("не совпадает", result["message"])
+
+    def test_evaluate_ruble_prices_passes_when_frame_and_disclaimer_prices_match(self):
+        tmp, base = make_result_dir(
+            make_ocr_log(
+                [
+                    ("Цена 1 999 руб.", (120, 80, 500, 120)),
+                    ("Рекламодатель ООО Ромашка, условия акции, цена 1999 ₽", (120, 400, 820, 430)),
+                ]
+            )
+        )
+        try:
+            result = evaluate_ruble_prices(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertFalse(result["price_mismatch"])
 
     def test_evaluates_item_id_10_inside_view_model(self):
         tmp, base = make_result_dir(make_ocr_log(["Стоимость 1999 ₽"]))

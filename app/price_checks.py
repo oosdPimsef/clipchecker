@@ -8,9 +8,25 @@ import re
 from pathlib import Path
 
 try:
-    from frame_safety import frame_second_label, iter_ocr_lines, load_ocr_log, normalize_text
+    from frame_safety import (
+        find_frames_dir,
+        frame_second_label,
+        frame_size,
+        is_legal_disclaimer_text,
+        iter_ocr_lines,
+        load_ocr_log,
+        normalize_text,
+    )
 except ImportError:
-    from .frame_safety import frame_second_label, iter_ocr_lines, load_ocr_log, normalize_text
+    from .frame_safety import (
+        find_frames_dir,
+        frame_second_label,
+        frame_size,
+        is_legal_disclaimer_text,
+        iter_ocr_lines,
+        load_ocr_log,
+        normalize_text,
+    )
 
 
 NO_PRICE_MESSAGE = "Цена в видеоряде не указана"
@@ -27,6 +43,15 @@ def normalize_price(price: str) -> str:
     return re.sub(r"\s+", " ", price.replace("\u00a0", " ")).strip()
 
 
+def normalize_price_value(price: str) -> str:
+    match = PRICE_RE.search(price or "")
+    if not match:
+        return normalize_price(price).lower()
+    amount = match.group("amount").replace("\u00a0", " ")
+    amount = re.sub(r"\s+", "", amount).replace(",", ".")
+    return amount
+
+
 def extract_ruble_prices(text: str) -> list[str]:
     prices = []
     for match in PRICE_RE.finditer(text or ""):
@@ -34,21 +59,36 @@ def extract_ruble_prices(text: str) -> list[str]:
     return prices
 
 
-def analyze_prices(ocr_data: dict) -> dict:
+def _line_scope(item: dict, frames_dir: Path | None) -> str:
+    if frames_dir is None:
+        return "frame"
+    size = frame_size(frames_dir / item["frame"])
+    if size is None:
+        return "frame"
+    _, height = size
+    return "legal_disclaimer" if is_legal_disclaimer_text(item["text"], item["bbox"], height) else "frame"
+
+
+def analyze_prices(ocr_data: dict, frames_dir: str | Path | None = None) -> dict:
+    frames_base = Path(frames_dir) if frames_dir else None
     grouped: dict[str, dict] = {}
     total = 0
 
     for item in iter_ocr_lines(ocr_data):
+        scope = _line_scope(item, frames_base)
         for price in extract_ruble_prices(item["text"]):
             total += 1
             key = normalize_price(price).lower()
             if key not in grouped:
                 grouped[key] = {
                     "price": price,
+                    "normalized_value": normalize_price_value(price),
+                    "scopes": [],
                     "seconds": [],
                     "frames": [],
                     "examples": [],
                 }
+            grouped[key]["scopes"].append(scope)
             grouped[key]["seconds"].append(frame_second_label(item["frame"]))
             grouped[key]["frames"].append(item["frame"])
             if len(grouped[key]["examples"]) < 2:
@@ -60,10 +100,25 @@ def analyze_prices(ocr_data: dict) -> dict:
             key=lambda value: int(re.search(r"\d+", value).group(0)) if re.search(r"\d+", value) else 0,
         )
         item["frames"] = sorted(set(item["frames"]))
+        item["scopes"] = sorted(set(item["scopes"]))
+
+    frame_values = {
+        item["normalized_value"]
+        for item in grouped.values()
+        if "frame" in item["scopes"]
+    }
+    legal_values = {
+        item["normalized_value"]
+        for item in grouped.values()
+        if "legal_disclaimer" in item["scopes"]
+    }
 
     return {
         "price_count": total,
         "prices": list(grouped.values()),
+        "frame_price_values": sorted(frame_values),
+        "legal_disclaimer_price_values": sorted(legal_values),
+        "price_mismatch": bool(frame_values and legal_values and frame_values != legal_values),
     }
 
 
@@ -86,20 +141,23 @@ def evaluate_ruble_prices(result_dir: str | Path) -> dict:
             "message": "Проверка цены будет выполнена после OCR кадров.",
         }
 
-    analysis = analyze_prices(load_ocr_log(ocr_path))
+    frames_dir = find_frames_dir(base)
+    analysis = analyze_prices(load_ocr_log(ocr_path), frames_dir)
     prices = analysis["prices"]
     if not prices:
         return {
-            "status": "fail",
+            "status": "pass",
             "message": NO_PRICE_MESSAGE,
             **analysis,
         }
 
     plain_prices = "; ".join(f"{item['price']} ({', '.join(item['seconds'][:5])})" for item in prices)
-    message = f"Найдена цена в рублях: {plain_prices}."
-    message_html = f"Найдена цена в рублях: {_format_prices_html(prices)}."
+    mismatch = analysis["price_mismatch"]
+    prefix = "Найдены цены в рублях, но цена в кадре не совпадает с ценой в набивке:" if mismatch else "Найдена цена в рублях:"
+    message = f"{prefix} {plain_prices}."
+    message_html = f"{html.escape(prefix)} {_format_prices_html(prices)}."
     return {
-        "status": "pass",
+        "status": "fail" if mismatch else "pass",
         "message": message,
         "message_html": message_html,
         **analysis,
