@@ -8,7 +8,15 @@ from pathlib import Path
 from PIL import Image
 
 from app.approval_checks import evaluate_approval_view_model
-from app.price_checks import NO_PRICE_MESSAGE, evaluate_ruble_prices, extract_ruble_prices, normalize_price_value
+from app.price_checks import (
+    NO_DOCUMENT_PRICE_MESSAGE,
+    NO_PRICE_MESSAGE,
+    evaluate_document_prices_match_video,
+    evaluate_ruble_prices,
+    extract_document_prices,
+    extract_ruble_prices,
+    normalize_price_value,
+)
 
 
 def make_ocr_line(text: str, box: tuple[int, int, int, int] = (120, 80, 500, 120)) -> dict:
@@ -69,6 +77,10 @@ def make_result_dir(ocr_log: dict):
     return tmp, base
 
 
+def write_documents_text(base: Path, text: str):
+    (base / "Documents_Texts.txt").write_text(text, encoding="utf-8")
+
+
 class PriceChecksTests(unittest.TestCase):
     def test_extract_ruble_prices(self):
         self.assertEqual(extract_ruble_prices("Цена 1 999 руб."), ["1 999 руб."])
@@ -77,6 +89,16 @@ class PriceChecksTests(unittest.TestCase):
         self.assertEqual(extract_ruble_prices("г. Москва, стр. 1, ОГРН 123456"), [])
         self.assertEqual(normalize_price_value("1 999 руб."), "1999")
         self.assertEqual(normalize_price_value("1999 ₽"), "1999")
+
+    def test_extract_document_prices_uses_price_context(self):
+        text = (
+            "Письмо рекламодателя. Сообщаем, что цена товара составляет 1 999 рублей. "
+            "Доверенность действует на сумму не более 10 000 рублей."
+        )
+
+        prices = extract_document_prices(text)
+
+        self.assertEqual([item["price"] for item in prices], ["1 999 рублей"])
 
     def test_evaluate_ruble_prices_outputs_large_red_html(self):
         tmp, base = make_result_dir(make_ocr_log(["Цена 1 999 руб.", "Реклама"]))
@@ -151,6 +173,70 @@ class PriceChecksTests(unittest.TestCase):
         self.assertEqual(item["status"], "pass")
         self.assertIn("message_html", item)
         self.assertIn("1999 ₽", item["message"])
+
+    def test_document_price_passes_when_only_document_has_price(self):
+        tmp, base = make_result_dir(make_ocr_log(["Реклама без цены"]))
+        write_documents_text(base, "Письмо. Стоимость товара составляет 1 999 руб.")
+        try:
+            result = evaluate_document_prices_match_video(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertIn("Цена найдена в документах", result["message"])
+        self.assertIn('<strong class="price-value">1 999 руб.</strong>', result["message_html"])
+
+    def test_document_price_fails_when_video_price_mismatch(self):
+        tmp, base = make_result_dir(make_ocr_log(["Цена 2 999 руб."]))
+        write_documents_text(base, "Письмо в свободной форме: цена товара 1 999 рублей.")
+        try:
+            result = evaluate_document_prices_match_video(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "fail")
+        self.assertTrue(result["price_mismatch"])
+        self.assertIn("не совпадает", result["message"])
+
+    def test_document_price_passes_when_video_price_matches(self):
+        tmp, base = make_result_dir(make_ocr_log(["Цена 1999 ₽"]))
+        write_documents_text(base, "Письмо: акционная цена товара - 1 999 рублей.")
+        try:
+            result = evaluate_document_prices_match_video(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertFalse(result["price_mismatch"])
+
+    def test_document_price_passes_when_missing(self):
+        tmp, base = make_result_dir(make_ocr_log(["Цена 1999 ₽"]))
+        write_documents_text(base, "Письмо без сведений о цене.")
+        try:
+            result = evaluate_document_prices_match_video(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["message"], NO_DOCUMENT_PRICE_MESSAGE)
+
+    def test_evaluates_item_id_11_inside_view_model(self):
+        tmp, base = make_result_dir(make_ocr_log(["Цена 1999 ₽"]))
+        write_documents_text(base, "Письмо: стоимость товара 1999 руб.")
+        view_model = {
+            "ok": True,
+            "blocks": [
+                {"name": "Документы", "items": [{"id": "11", "number": "11", "text": "цена в письме"}]},
+            ],
+        }
+        try:
+            evaluated = evaluate_approval_view_model(view_model, base)
+        finally:
+            tmp.cleanup()
+
+        item = evaluated["blocks"][0]["items"][0]
+        self.assertEqual(item["status"], "pass")
+        self.assertIn("message_html", item)
 
 
 if __name__ == "__main__":
