@@ -17,11 +17,11 @@ def make_workbook():
     ws = wb.active
     ws.title = "РМ"
     ws.append(["", "", "", "", "Категория"])
-    ws.append(["", "Блок проверки", "номер", "Проверка", "Ювелирная", "Ритейл", "Фарма"])
-    ws.append(["", "Видеоряд", 1, "длительность ролика кратна 5 секундам", 1, 1, 1])
-    ws.append(["", "Видеоряд", 2, "в видеоряде есть изображение ювелирного изделия", 1, "", ""])
-    ws.append(["", "Набивка", 3, "есть возрастная маркировка", 1, "", 1])
-    ws.append(["", "Документы", 4, "есть письмо о сайте", "", 1, ""])
+    ws.append(["", "Блок проверки", "номер", "id", "Проверка", "Ювелирная", "Ритейл", "Фарма"])
+    ws.append(["", "Видеоряд", 1, "V-001", "длительность ролика кратна 5 секундам", 1, 1, 1])
+    ws.append(["", "Видеоряд", 2, "V-002", "в видеоряде есть изображение ювелирного изделия", 1, "", ""])
+    ws.append(["", "Набивка", 3, "N-003", "есть возрастная маркировка", 1, "", 1])
+    ws.append(["", "Документы", 4, "D-004", "есть письмо о сайте", "", 1, ""])
     wb.save(path)
     wb.close()
     return path
@@ -40,6 +40,7 @@ class ApprovalMapTests(unittest.TestCase):
         try:
             checklist = load_approval_checklist("Ювелирная", path)
             self.assertEqual(list(checklist.keys()), ["Видеоряд", "Набивка"])
+            self.assertEqual([item.id for item in checklist["Видеоряд"]], ["V-001", "V-002"])
             self.assertEqual([item.number for item in checklist["Видеоряд"]], ["1", "2"])
             self.assertEqual(checklist["Набивка"][0].text, "есть возрастная маркировка")
         finally:
@@ -52,10 +53,10 @@ class ApprovalMapTests(unittest.TestCase):
             self.assertTrue(model["ok"])
             self.assertEqual(model["selected_category"], "Ритейл")
             self.assertEqual([block["name"] for block in model["blocks"]], ["Видеоряд", "Документы"])
+            self.assertEqual(model["blocks"][0]["items"][0]["id"], "V-001")
         finally:
             os.remove(path)
 
 
 if __name__ == "__main__":
     unittest.main()
-

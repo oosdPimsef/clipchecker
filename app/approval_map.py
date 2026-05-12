@@ -27,6 +27,7 @@ REQUIRED_BLOCK_ORDER = [
 
 @dataclass(frozen=True)
 class ApprovalItem:
+    id: str
     block: str
     number: str
     text: str
@@ -53,13 +54,14 @@ def _find_header_row(ws) -> tuple[int, dict[str, int], list[tuple[str, int]]]:
 
         block_col = lower.index("блок проверки") + 1
         check_col = lower.index("проверка") + 1
+        id_col = lower.index("id") + 1 if "id" in lower else None
         number_col = lower.index("номер") + 1 if "номер" in lower else None
         categories: list[tuple[str, int]] = []
         for col in range(check_col + 1, ws.max_column + 1):
             name = _norm(ws.cell(row_idx, col).value)
             if name:
                 categories.append((name, col))
-        return row_idx, {"block": block_col, "number": number_col or 0, "check": check_col}, categories
+        return row_idx, {"block": block_col, "id": id_col or 0, "number": number_col or 0, "check": check_col}, categories
 
     raise ValueError("В листе РМ не найдена строка заголовков с колонками 'Блок проверки' и 'Проверка'")
 
@@ -97,10 +99,11 @@ def load_approval_checklist(category: str, path: Path | str = APPROVAL_MAP_PATH)
             if not block or not text:
                 continue
 
+            item_id = _norm(ws.cell(row_idx, columns["id"]).value) if columns["id"] else ""
             number = _norm(ws.cell(row_idx, columns["number"]).value) if columns["number"] else ""
             if block not in blocks:
                 blocks[block] = []
-            blocks[block].append(ApprovalItem(block=block, number=number, text=text))
+            blocks[block].append(ApprovalItem(id=item_id, block=block, number=number, text=text))
 
         return OrderedDict((block, items) for block, items in blocks.items() if items)
     finally:
@@ -117,7 +120,13 @@ def build_approval_view_model(category: str | None, path: Path | str = APPROVAL_
             "categories": categories,
             "selected_category": selected,
             "blocks": [
-                {"name": block, "items": [{"number": item.number, "text": item.text} for item in items]}
+                {
+                    "name": block,
+                    "items": [
+                        {"id": item.id, "number": item.number, "text": item.text}
+                        for item in items
+                    ],
+                }
                 for block, items in blocks.items()
             ],
             "error": "",
@@ -130,4 +139,3 @@ def build_approval_view_model(category: str | None, path: Path | str = APPROVAL_
             "blocks": [],
             "error": str(exc),
         }
-
