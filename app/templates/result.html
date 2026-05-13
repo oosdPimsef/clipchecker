@@ -362,6 +362,12 @@
 
       try{
         var out=document.getElementById("live-log-output"), wrap=document.getElementById("live-log-wrap");
+        var reloaded=false;
+        function reloadResults(){
+          if(reloaded) return;
+          reloaded=true;
+          setTimeout(function(){ location.reload(); }, 800);
+        }
         var es=new EventSource("/stream-logs");
         es.onmessage=function(ev){ if(!out) return; out.textContent+=(out.textContent?"\n":"")+ev.data; out.scrollTop=out.scrollHeight; };
         es.addEventListener("done",function(){
@@ -374,8 +380,24 @@
             clearInterval(intId);
           }catch(e){}
           try{ es.close(); }catch(e){}
-          setTimeout(function(){ location.reload(); }, 800);
+          reloadResults();
         });
+        var statusPollId=setInterval(function(){
+          fetch('/status', {cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){
+            if(j && j.done){
+              clearInterval(statusPollId);
+              try{ es.close(); }catch(e){}
+              try{
+                var elapsed=fmt(Date.now()-startMs);
+                localStorage.setItem(K_LAST, elapsed);
+                localStorage.removeItem(K_STARTED);
+                if(dot){ dot.classList.remove('red'); dot.classList.add('green'); }
+                clearInterval(intId);
+              }catch(e){}
+              reloadResults();
+            }
+          }).catch(function(){});
+        }, 2000);
       }catch(e){}
     })();
   </script>

@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-from flask import Flask, request, render_template, send_from_directory, Response, stream_with_context, jsonify
+from flask import Flask, request, render_template, send_from_directory, Response, stream_with_context, jsonify, redirect, url_for
 import os
 import sys
 import json
@@ -509,11 +509,16 @@ def index():
 
             process, launch_time = _launch_analysis_background()
             _wait_for_analysis_start(preview_path, process, launch_time)
-            results = _collect_results_for_template(get_preview_path())
-            return render_template("result.html", **results)
+            return redirect(url_for("result"))
         except Exception as e:
             return f"<h2>❌ Ошибка при обработке:</h2><pre>{e}</pre>"
     return render_template("form.html", approval_categories=load_approval_categories())
+
+
+@app.route("/result")
+def result():
+    results = _collect_results_for_template(get_preview_path())
+    return render_template("result.html", **results)
 
 @app.route("/pdf")
 def serve_pdf():
