@@ -11,14 +11,14 @@ try:
     from frame_safety import evaluate_all_text_safety, evaluate_legal_disclaimer_safety, evaluate_logo_safety
     from foreign_words import evaluate_foreign_words
     from grammar_checks import evaluate_legal_disclaimer_grammar, evaluate_non_legal_grammar
-    from jewelry_check import evaluate_jewelry_presence
+    from jewelry_check import evaluate_jewelry_presence, evaluate_jewelry_tags_required
     from price_checks import evaluate_document_prices_match_video, evaluate_ruble_prices
 except ImportError:
     from .black_bars import evaluate_black_side_bars
     from .frame_safety import evaluate_all_text_safety, evaluate_legal_disclaimer_safety, evaluate_logo_safety
     from .foreign_words import evaluate_foreign_words
     from .grammar_checks import evaluate_legal_disclaimer_grammar, evaluate_non_legal_grammar
-    from .jewelry_check import evaluate_jewelry_presence
+    from .jewelry_check import evaluate_jewelry_presence, evaluate_jewelry_tags_required
     from .price_checks import evaluate_document_prices_match_video, evaluate_ruble_prices
 
 
@@ -191,6 +191,7 @@ EVALUATORS = {
     "10": evaluate_ruble_prices,
     "11": evaluate_document_prices_match_video,
     "12": evaluate_jewelry_presence,
+    "13": evaluate_jewelry_tags_required,
 }
 
 

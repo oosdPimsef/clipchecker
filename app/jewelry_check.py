@@ -17,6 +17,8 @@ JEWELRY_NOT_FOUND_MESSAGE = (
     "Необходимо проверить наличие ювелирных изделий в видеоряде и предоставить документы "
     "о постановке на спецучет в ГИИС ДМДК"
 )
+JEWELRY_TAGS_REQUIRED_MESSAGE = "Необходимо предосатвить бирки на ювелирную продукцию в ролике"
+JEWELRY_TAGS_NOT_REQUIRED_MESSAGE = "Ювелирных изделий в видеоряд не найдено"
 
 JEWELRY_KEYWORDS = [
     "ювелир",
@@ -131,7 +133,7 @@ def analyze_jewelry_mentions_from_text(text: str) -> dict:
     }
 
 
-def evaluate_jewelry_presence(result_dir: str | Path) -> dict:
+def _analyze_jewelry_from_result_dir(result_dir: str | Path) -> tuple[dict, bool]:
     base = Path(result_dir)
     ocr_path = base / "OCR_Log.json"
     all_text_path = base / "All_Frames_Text.txt"
@@ -142,6 +144,12 @@ def evaluate_jewelry_presence(result_dir: str | Path) -> dict:
     else:
         analysis = analyze_jewelry_mentions_from_text(_read_text(all_text_path))
 
+    has_materials = frames_dir.is_dir() or all_text_path.is_file() or ocr_path.is_file()
+    return analysis, has_materials
+
+
+def evaluate_jewelry_presence(result_dir: str | Path) -> dict:
+    analysis, has_materials = _analyze_jewelry_from_result_dir(result_dir)
     mentions = analysis["jewelry_mentions"]
     if mentions:
         keywords = ", ".join(item["keyword"] for item in mentions[:8])
@@ -158,7 +166,7 @@ def evaluate_jewelry_presence(result_dir: str | Path) -> dict:
             **analysis,
         }
 
-    if not frames_dir.is_dir() and not all_text_path.is_file():
+    if not has_materials:
         return {
             "status": "pending",
             "message": "Проверка наличия ювелирных изделий будет выполнена после извлечения кадров и OCR.",
@@ -168,5 +176,29 @@ def evaluate_jewelry_presence(result_dir: str | Path) -> dict:
     return {
         "status": "warning",
         "message": JEWELRY_NOT_FOUND_MESSAGE,
+        **analysis,
+    }
+
+
+def evaluate_jewelry_tags_required(result_dir: str | Path) -> dict:
+    analysis, has_materials = _analyze_jewelry_from_result_dir(result_dir)
+    mentions = analysis["jewelry_mentions"]
+    if mentions:
+        return {
+            "status": "warning",
+            "message": JEWELRY_TAGS_REQUIRED_MESSAGE,
+            **analysis,
+        }
+
+    if not has_materials:
+        return {
+            "status": "pending",
+            "message": "Проверка наличия бирок будет выполнена после извлечения кадров и OCR.",
+            **analysis,
+        }
+
+    return {
+        "status": "pass",
+        "message": JEWELRY_TAGS_NOT_REQUIRED_MESSAGE,
         **analysis,
     }
