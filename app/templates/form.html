@@ -66,6 +66,15 @@
     }
     .txt:focus, select:focus{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent)}
     small.help{display:block;margin-top:6px;color:var(--muted)}
+    details.test-materials{border:1px solid var(--border);border-radius:12px;background:color-mix(in srgb, var(--surface) 98%, black);overflow:hidden}
+    details.test-materials summary{cursor:pointer;list-style:none;padding:12px 14px;font-weight:700;color:var(--fg)}
+    details.test-materials summary::-webkit-details-marker{display:none}
+    details.test-materials summary::after{content:"▾";float:right;color:var(--muted)}
+    details.test-materials[open] summary{border-bottom:1px solid var(--border)}
+    .test-materials-body{display:grid;gap:12px;padding:14px}
+    .secondary-button{border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--accent);font-weight:700;padding:10px 12px;cursor:pointer;width:max-content}
+    .secondary-button:hover{box-shadow:0 4px 12px rgba(0,0,0,.08)}
+    .copy-status{color:var(--muted);font-size:12px}
 
     /* Кнопка в виде изображения (как в текущем проекте) */
     .image-button{background:transparent;border:0;padding:0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
@@ -105,6 +114,29 @@
             <input class="txt" type="text" id="broadcast" name="broadcast" required placeholder="Например: D:\Projects\clip\broadcast\">
           </div>
 
+          <details class="test-materials">
+            <summary>Материалы для тестирования</summary>
+            <div class="test-materials-body">
+              <div>
+                <label for="test-preview">Видеоролик (превью)</label>
+                <input class="txt" type="text" id="test-preview" placeholder="Тестовая ссылка на папку с превью">
+              </div>
+
+              <div>
+                <label for="test-docs">Документы</label>
+                <input class="txt" type="text" id="test-docs" placeholder="Тестовая ссылка на папку с документами">
+              </div>
+
+              <div>
+                <label for="test-broadcast">Эфирная версия</label>
+                <input class="txt" type="text" id="test-broadcast" placeholder="Тестовая ссылка на папку с эфирной версией">
+              </div>
+
+              <button type="button" class="secondary-button" id="copy-test-materials">Копировать ссылки</button>
+              <small class="copy-status" id="copy-test-materials-status">Тестовые ссылки сохраняются в браузере автоматически.</small>
+            </div>
+          </details>
+
           <div>
             <label for="approval_category">Категория рекламодателя</label>
             <select id="approval_category" name="approval_category" required>
@@ -134,5 +166,37 @@
       </form>
     </section>
   </main>
+  <script>
+    (function(){
+      var mapping = [
+        {storage: 'clipchecker.test.preview', testId: 'test-preview', mainId: 'preview'},
+        {storage: 'clipchecker.test.docs', testId: 'test-docs', mainId: 'docs'},
+        {storage: 'clipchecker.test.broadcast', testId: 'test-broadcast', mainId: 'broadcast'}
+      ];
+      var status = document.getElementById('copy-test-materials-status');
+
+      mapping.forEach(function(item){
+        var input = document.getElementById(item.testId);
+        if(!input) return;
+        input.value = localStorage.getItem(item.storage) || '';
+        input.addEventListener('input', function(){
+          localStorage.setItem(item.storage, input.value);
+          if(status) status.textContent = 'Тестовые ссылки сохранены.';
+        });
+      });
+
+      var button = document.getElementById('copy-test-materials');
+      if(button){
+        button.addEventListener('click', function(){
+          mapping.forEach(function(item){
+            var source = document.getElementById(item.testId);
+            var target = document.getElementById(item.mainId);
+            if(source && target) target.value = source.value;
+          });
+          if(status) status.textContent = 'Ссылки скопированы в основные поля.';
+        });
+      }
+    })();
+  </script>
 </body>
 </html>
