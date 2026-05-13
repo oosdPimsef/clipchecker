@@ -1,12 +1,18 @@
 ﻿# -*- coding: utf-8 -*-
 import os
+from dotenv import load_dotenv
+from materials_workspace import ensure_materials_dir, prepare_materials_dir
+
+load_dotenv()
+preview_dir = os.environ["PREVIEW_PATH"]
+_EARLY_RESULT_DIR = str(prepare_materials_dir(preview_dir))
+
 import subprocess
 import requests
 from moviepy.editor import VideoFileClip
 from mutagen import File as AudioFile
 from fpdf import FPDF
 from faster_whisper import WhisperModel
-from dotenv import load_dotenv
 import json
 import base64
 import asyncio
@@ -323,13 +329,12 @@ import sys, time, json
 
 def _init_live_log_and_status(preview_dir_path: str):
     """Создаёт Clipchecker_materials, включает tee для stdout/stderr в clipchecker.log и пишет стартовый статус."""
-    res_dir = os.path.join(preview_dir_path, "Clipchecker_materials")
-    os.makedirs(res_dir, exist_ok=True)
+    res_dir = str(ensure_materials_dir(preview_dir_path))
     log_path = os.path.join(res_dir, "clipchecker.log")
     status_path = os.path.join(res_dir, "run_status.json")
 
     # Линейно-буферизованный файл: запись строки сразу видна в браузере
-    _log_file = open(log_path, "a", encoding="utf-8", buffering=1)
+    _log_file = open(log_path, "w", encoding="utf-8", buffering=1)
 
     class _Tee:
         def __init__(self, *streams):

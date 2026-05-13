@@ -465,8 +465,26 @@ def _collect_results_for_template(preview_path: str):
 def _launch_analysis_background():
     python_exe = sys.executable or "python"
     env = os.environ.copy()
-    subprocess.Popen([python_exe, "run_analysis.py"],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, shell=False, cwd=BASE_DIR)
+    launch_time = time.time()
+    process = subprocess.Popen([python_exe, "run_analysis.py"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, shell=False, cwd=BASE_DIR)
+    return process, launch_time
+
+
+def _wait_for_analysis_start(preview_path: str, process, launch_time: float, timeout_sec: float = 15.0):
+    result_dir = os.path.join(preview_path, "Clipchecker_materials")
+    log_path = os.path.join(result_dir, "clipchecker.log")
+    status_path = os.path.join(result_dir, "run_status.json")
+    started_at = time.time()
+
+    while time.time() - started_at < timeout_sec:
+        if process.poll() is not None:
+            break
+        if os.path.exists(log_path) and os.path.getmtime(log_path) >= launch_time:
+            return
+        if os.path.exists(status_path) and os.path.getmtime(status_path) >= launch_time:
+            return
+        time.sleep(0.1)
 
 # ------------------------------- Роуты ---------------------------------------
 @app.route('/', methods=['GET', 'POST'])
@@ -486,7 +504,8 @@ def index():
             if openai_model:
                 os.environ['OPENAI_MODEL'] = openai_model
 
-            _launch_analysis_background()
+            process, launch_time = _launch_analysis_background()
+            _wait_for_analysis_start(preview_path, process, launch_time)
             results = _collect_results_for_template(get_preview_path())
             return render_template("result.html", **results)
         except Exception as e:
