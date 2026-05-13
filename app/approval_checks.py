@@ -203,7 +203,16 @@ def evaluate_approval_view_model(view_model: dict, result_dir: str | Path) -> di
                 item["message"] = "Оценка Python: будет добавлена на следующем этапе."
                 continue
 
-            result = evaluator(result_dir)
+            try:
+                result = evaluator(result_dir)
+            except Exception as exc:
+                item["status"] = "pending"
+                item["message"] = (
+                    "Проверка будет выполнена после завершения записи материалов предобработки. "
+                    f"Техническая причина: {exc}"
+                )
+                item["details"] = {"error": str(exc), "error_type": exc.__class__.__name__}
+                continue
             item["status"] = result.get("status", "pending")
             item["message"] = result.get("message", "")
             if result.get("message_html"):

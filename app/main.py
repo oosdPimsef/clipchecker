@@ -486,6 +486,9 @@ def _wait_for_analysis_start(preview_path: str, process, launch_time: float, tim
             return
         time.sleep(0.1)
 
+    if process.poll() is not None and not os.path.exists(log_path):
+        _append_runtime_log(preview_path, f"run_analysis.py завершился до создания лога. Код выхода: {process.returncode}")
+
 # ------------------------------- Роуты ---------------------------------------
 @app.route('/', methods=['GET', 'POST'])
 def index():

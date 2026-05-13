@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from app.approval_checks import (
+    EVALUATORS,
     evaluate_approval_view_model,
     evaluate_booking_form_duration_matches_video,
     evaluate_duration_multiple_of_five,
@@ -180,6 +181,30 @@ class ApprovalChecksTests(unittest.TestCase):
 
         self.assertEqual(evaluated["blocks"][0]["items"][0]["status"], "pass")
         self.assertIn("В БЗ указано 15 секунд", evaluated["blocks"][0]["items"][0]["message"])
+
+    def test_evaluator_error_does_not_break_view_model(self):
+        tmp, base = make_result_dir(15)
+        original = EVALUATORS.get("99")
+        EVALUATORS["99"] = lambda _result_dir: (_ for _ in ()).throw(ValueError("temporary empty json"))
+        view_model = {
+            "ok": True,
+            "blocks": [
+                {"name": "РўРµСЃС‚", "items": [{"id": "99", "number": "99", "text": "С‚РµСЃС‚"}]},
+            ],
+        }
+        try:
+            evaluated = evaluate_approval_view_model(view_model, base)
+        finally:
+            if original is None:
+                EVALUATORS.pop("99", None)
+            else:
+                EVALUATORS["99"] = original
+            tmp.cleanup()
+
+        item = evaluated["blocks"][0]["items"][0]
+        self.assertEqual(item["status"], "pending")
+        self.assertIn("temporary empty json", item["message"])
+        self.assertEqual(item["details"]["error_type"], "ValueError")
 
 
 if __name__ == "__main__":
