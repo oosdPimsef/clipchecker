@@ -15,6 +15,8 @@ from app.media_person_check import (
     NO_ACTORS_MESSAGE,
     SEARCH_CACHE_NAME,
     SEARCH_CACHE_VERSION,
+    _analysis_face_files,
+    _face_signature,
     evaluate_actor_recognition,
     extract_actor_names,
     extract_names_from_search_text,
@@ -34,6 +36,7 @@ def make_result_dir(search_faces: list[dict] | None = None, create_faces: bool =
                 {
                     "ok": True,
                     "cache_version": SEARCH_CACHE_VERSION,
+                    "face_signature": _face_signature(_analysis_face_files(base)),
                     "provider": "direct_web",
                     "faces": search_faces,
                 },
@@ -94,6 +97,20 @@ class MediaPersonCheckTests(unittest.TestCase):
         self.assertEqual(result["status"], "pass")
         self.assertEqual(result["message"], ACTOR_NOT_RECOGNIZED_MESSAGE)
         self.assertEqual([face["file"] for face in result["search_results"]["faces"]], ["face_001.jpg"])
+
+    def test_faces_thumbnails_pdf_pages_are_used_as_separate_faces(self):
+        tmp = tempfile.TemporaryDirectory()
+        base = Path(tmp.name)
+        try:
+            first = Image.new("RGB", (120, 120), "white")
+            second = Image.new("RGB", (120, 120), "gray")
+            first.save(base / "Faces_Thumbnails.pdf", save_all=True, append_images=[second])
+
+            faces = _analysis_face_files(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual([path.name for path in faces], ["face_pdf_page_001.jpg", "face_pdf_page_002.jpg"])
 
     @unittest.skip("direct web parser is a fallback; local known-face matching is the primary actor recognition path")
     def test_direct_web_search_extracts_names_from_search_pages(self):

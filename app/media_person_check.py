@@ -20,12 +20,19 @@ try:
 except Exception:  # pragma: no cover - optional runtime dependency
     face_recognition = None
 
+try:
+    import fitz
+except Exception:  # pragma: no cover - optional runtime dependency
+    fitz = None
+
 
 NO_ACTORS_MESSAGE = "Актеров в ролике нет"
 ACTOR_NOT_RECOGNIZED_MESSAGE = "Актер не распознан"
 SEARCH_CACHE_NAME = "Actor_Web_Search_Results.json"
-SEARCH_CACHE_VERSION = 2
+SEARCH_CACHE_VERSION = 3
 KNOWN_FACES_CACHE_NAME = "Known_Faces_Encodings.json"
+FACES_THUMBNAILS_PDF_NAME = "Faces_Thumbnails.pdf"
+FACES_FROM_PDF_DIR_NAME = "faces_from_pdf"
 SEARCH_ENDPOINT_ENV = "MEDIA_PERSON_WEB_SEARCH_ENDPOINT"
 SERPAPI_KEY_ENV = "SERPAPI_API_KEY"
 SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
@@ -114,12 +121,54 @@ def _face_files(faces_dir: Path) -> list[Path]:
     )
 
 
+def _render_faces_pdf_pages(base: Path) -> list[Path]:
+    pdf_path = base / FACES_THUMBNAILS_PDF_NAME
+    if not pdf_path.is_file() or fitz is None:
+        return []
+
+    rendered = []
+    try:
+        output_dir = base / FACES_FROM_PDF_DIR_NAME
+        output_dir.mkdir(parents=True, exist_ok=True)
+        doc = fitz.open(str(pdf_path))
+        for page_index in range(doc.page_count):
+            out_path = output_dir / f"face_pdf_page_{page_index + 1:03d}.jpg"
+            if not out_path.is_file() or out_path.stat().st_mtime < pdf_path.stat().st_mtime:
+                page = doc.load_page(page_index)
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+                pix.save(str(out_path))
+            rendered.append(out_path)
+    except Exception:
+        return []
+    return rendered
+
+
+def _analysis_face_files(base: Path) -> list[Path]:
+    pdf_faces = _render_faces_pdf_pages(base)
+    if pdf_faces:
+        return pdf_faces
+    return _face_files(base / "faces")
+
+
+def _face_signature(faces: list[Path]) -> list[dict]:
+    return [
+        {
+            "file": path.name,
+            "size": path.stat().st_size,
+            "mtime": path.stat().st_mtime,
+        }
+        for path in faces
+    ]
+
+
 def _known_faces_dir() -> Path:
     return Path(os.getenv(KNOWN_FACES_DIR_ENV, DEFAULT_KNOWN_FACES_DIR))
 
 
 def _cache_matches_faces(cached: dict, faces: list[Path]) -> bool:
     if cached.get("cache_version") != SEARCH_CACHE_VERSION:
+        return False
+    if cached.get("face_signature") != _face_signature(faces):
         return False
     cached_names = sorted(str(item.get("file", "")) for item in cached.get("faces", []))
     current_names = sorted(path.name for path in faces)
@@ -629,7 +678,7 @@ def _search_face_via_endpoint(face_path: Path, endpoint: str) -> dict:
 def search_actor_names(result_dir: str | Path) -> dict:
     base = Path(result_dir)
     cache_path = base / SEARCH_CACHE_NAME
-    faces = _face_files(base / "faces")
+    faces = _analysis_face_files(base)
     configured_provider = _configured_provider()
     cached = _read_json(cache_path)
     if (
@@ -644,6 +693,7 @@ def search_actor_names(result_dir: str | Path) -> dict:
         result = {
             "ok": True,
             "cache_version": SEARCH_CACHE_VERSION,
+            "face_signature": [],
             "searched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "provider": "none",
             "faces": [],
@@ -697,6 +747,7 @@ def search_actor_names(result_dir: str | Path) -> dict:
     result = {
         "ok": True,
         "cache_version": SEARCH_CACHE_VERSION,
+        "face_signature": _face_signature(faces),
         "searched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "provider": provider,
         "faces": results,
