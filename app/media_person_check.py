@@ -51,6 +51,12 @@ def _face_files(faces_dir: Path) -> list[Path]:
     )
 
 
+def _cache_matches_faces(cached: dict, faces: list[Path]) -> bool:
+    cached_names = sorted(str(item.get("file", "")) for item in cached.get("faces", []))
+    current_names = sorted(path.name for path in faces)
+    return cached_names == current_names
+
+
 def extract_names_from_search_text(text: str) -> list[str]:
     if not text or NEGATIVE_RESULT_RE.search(text):
         return []
@@ -125,11 +131,11 @@ def _search_face_via_endpoint(face_path: Path, endpoint: str) -> dict:
 def search_actor_names(result_dir: str | Path) -> dict:
     base = Path(result_dir)
     cache_path = base / SEARCH_CACHE_NAME
+    faces = _face_files(base / "faces")
     cached = _read_json(cache_path)
-    if cached and cached.get("ok"):
+    if cached and cached.get("ok") and _cache_matches_faces(cached, faces):
         return cached
 
-    faces = _face_files(base / "faces")
     if not faces:
         result = {
             "ok": True,

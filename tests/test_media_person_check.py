@@ -65,6 +65,17 @@ class MediaPersonCheckTests(unittest.TestCase):
         self.assertEqual(result["status"], "pass")
         self.assertEqual(result["message"], ACTOR_NOT_RECOGNIZED_MESSAGE)
 
+    def test_stale_empty_cache_is_ignored_when_faces_exist(self):
+        tmp, base = make_result_dir(search_faces=[], create_faces=True)
+        try:
+            result = evaluate_actor_recognition(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["message"], ACTOR_NOT_RECOGNIZED_MESSAGE)
+        self.assertEqual([face["file"] for face in result["search_results"]["faces"]], ["face_001.jpg"])
+
     def test_evaluate_actor_recognition_outputs_red_bold_name(self):
         tmp, base = make_result_dir(
             search_faces=[{"file": "face_001.jpg", "raw_result": "Иван Ургант", "names": ["Иван Ургант"]}],
