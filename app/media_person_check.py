@@ -12,21 +12,33 @@ from mimetypes import guess_type
 from pathlib import Path
 from urllib.parse import quote
 
+import numpy as np
 import requests
+
+try:
+    import face_recognition
+except Exception:  # pragma: no cover - optional runtime dependency
+    face_recognition = None
 
 
 NO_ACTORS_MESSAGE = "Актеров в ролике нет"
 ACTOR_NOT_RECOGNIZED_MESSAGE = "Актер не распознан"
 SEARCH_CACHE_NAME = "Actor_Web_Search_Results.json"
 SEARCH_CACHE_VERSION = 2
+KNOWN_FACES_CACHE_NAME = "Known_Faces_Encodings.json"
 SEARCH_ENDPOINT_ENV = "MEDIA_PERSON_WEB_SEARCH_ENDPOINT"
 SERPAPI_KEY_ENV = "SERPAPI_API_KEY"
 SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
 PUBLIC_BASE_URL_ENV = "MEDIA_PERSON_PUBLIC_FACE_BASE_URL"
 PUBLIC_UPLOAD_ENDPOINT_ENV = "MEDIA_PERSON_FACE_UPLOAD_ENDPOINT"
 SEARCH_PROVIDER_ENV = "MEDIA_PERSON_SEARCH_PROVIDER"
+KNOWN_FACES_DIR_ENV = "MEDIA_PERSON_KNOWN_FACES_DIR"
 DIRECT_WEB_PROVIDER = "direct_web"
+LOCAL_KNOWN_FACES_PROVIDER = "local_known_faces"
 SERPAPI_PROVIDER = "serpapi_google_lens"
+DEFAULT_KNOWN_FACES_DIR = (
+    r"C:\Users\PTambulatov\Desktop\PT\2.Расчеты\50. ХАКАТОН\7. face recognition\known_faces"
+)
 
 NAME_RE = re.compile(
     r"\b([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+){1,2}|[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b"
@@ -102,6 +114,10 @@ def _face_files(faces_dir: Path) -> list[Path]:
     )
 
 
+def _known_faces_dir() -> Path:
+    return Path(os.getenv(KNOWN_FACES_DIR_ENV, DEFAULT_KNOWN_FACES_DIR))
+
+
 def _cache_matches_faces(cached: dict, faces: list[Path]) -> bool:
     if cached.get("cache_version") != SEARCH_CACHE_VERSION:
         return False
@@ -112,7 +128,7 @@ def _cache_matches_faces(cached: dict, faces: list[Path]) -> bool:
 
 def _configured_provider() -> str:
     configured = os.getenv(SEARCH_PROVIDER_ENV, "").strip().lower()
-    if configured in {DIRECT_WEB_PROVIDER, SERPAPI_PROVIDER, "endpoint", "none"}:
+    if configured in {LOCAL_KNOWN_FACES_PROVIDER, DIRECT_WEB_PROVIDER, SERPAPI_PROVIDER, "endpoint", "none"}:
         if configured == "endpoint":
             return os.getenv(SEARCH_ENDPOINT_ENV, "").strip() or "endpoint"
         return configured
@@ -270,6 +286,158 @@ def _dedupe_names(names: list[str]) -> list[str]:
             seen.add(key)
             out.append(normalized)
     return out
+
+
+def _name_from_reference_path(path: Path, root: Path) -> str:
+    rel = path.relative_to(root)
+    if len(rel.parts) > 1:
+        return rel.parts[0].replace("_", " ").strip()
+    return path.stem.replace("_", " ").strip()
+
+
+def _known_reference_files(root: Path) -> list[Path]:
+    if not root.is_dir():
+        return []
+    return sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+    )
+
+
+def _reference_signature(files: list[Path]) -> list[dict]:
+    return [
+        {
+            "path": str(path),
+            "mtime": path.stat().st_mtime,
+            "size": path.stat().st_size,
+        }
+        for path in files
+    ]
+
+
+def _face_encoding_for_image(path: Path):
+    if face_recognition is None:
+        return None
+    image = face_recognition.load_image_file(str(path))
+    locations = face_recognition.face_locations(image)
+    encodings = face_recognition.face_encodings(image, locations)
+    if not encodings:
+        encodings = face_recognition.face_encodings(image)
+    if not encodings:
+        return None
+    return np.asarray(encodings[0], dtype=float)
+
+
+def _load_known_face_encodings(root: Path) -> dict:
+    files = _known_reference_files(root)
+    signature = _reference_signature(files)
+    cache_path = root / KNOWN_FACES_CACHE_NAME
+    cached = _read_json(cache_path)
+    if cached and cached.get("signature") == signature:
+        return cached
+
+    people = []
+    errors = []
+    for path in files:
+        try:
+            encoding = _face_encoding_for_image(path)
+            if encoding is None:
+                errors.append({"file": str(path), "error": "face was not detected"})
+                continue
+            people.append(
+                {
+                    "name": _name_from_reference_path(path, root),
+                    "file": str(path),
+                    "encoding": encoding.tolist(),
+                }
+            )
+        except Exception as exc:
+            errors.append({"file": str(path), "error": str(exc)})
+
+    result = {
+        "ok": True,
+        "cache_version": 1,
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "root": str(root),
+        "signature": signature,
+        "people": people,
+        "errors": errors,
+    }
+    if root.is_dir():
+        _write_json(cache_path, result)
+    return result
+
+
+def _search_face_via_known_faces(face_path: Path) -> dict:
+    root = _known_faces_dir()
+    if face_recognition is None:
+        return {
+            "file": face_path.name,
+            "provider": LOCAL_KNOWN_FACES_PROVIDER,
+            "raw_result": "",
+            "names": [],
+            "errors": [{"error": "face_recognition is not installed"}],
+        }
+
+    known = _load_known_face_encodings(root)
+    people = known.get("people", [])
+    if not people:
+        return {
+            "file": face_path.name,
+            "provider": LOCAL_KNOWN_FACES_PROVIDER,
+            "raw_result": "",
+            "names": [],
+            "known_faces_dir": str(root),
+            "errors": [{"error": f"known faces database is empty: {root}"}],
+        }
+
+    try:
+        face_encoding = _face_encoding_for_image(face_path)
+        if face_encoding is None:
+            return {
+                "file": face_path.name,
+                "provider": LOCAL_KNOWN_FACES_PROVIDER,
+                "raw_result": "",
+                "names": [],
+                "known_faces_dir": str(root),
+                "errors": [{"error": "face was not detected"}],
+            }
+    except Exception as exc:
+        return {
+            "file": face_path.name,
+            "provider": LOCAL_KNOWN_FACES_PROVIDER,
+            "raw_result": "",
+            "names": [],
+            "known_faces_dir": str(root),
+            "errors": [{"error": str(exc)}],
+        }
+
+    known_encodings = np.asarray([item["encoding"] for item in people], dtype=float)
+    distances = face_recognition.face_distance(known_encodings, face_encoding)
+    matches = []
+    tolerance = float(os.getenv("MEDIA_PERSON_KNOWN_FACE_TOLERANCE", "0.5"))
+    for person, distance in zip(people, distances):
+        distance_value = float(distance)
+        if distance_value <= tolerance:
+            matches.append(
+                {
+                    "name": person["name"],
+                    "distance": round(distance_value, 4),
+                    "reference_file": person["file"],
+                }
+            )
+    matches.sort(key=lambda item: item["distance"])
+    best = matches[: int(os.getenv("MEDIA_PERSON_KNOWN_FACE_MAX_MATCHES", "3"))]
+    return {
+        "file": face_path.name,
+        "provider": LOCAL_KNOWN_FACES_PROVIDER,
+        "raw_result": "; ".join(f"{item['name']} ({item['distance']})" for item in best),
+        "names": _dedupe_names([item["name"] for item in best]),
+        "known_faces_dir": str(root),
+        "matches": best,
+        "errors": known.get("errors", []),
+    }
 
 
 def _public_url_from_base(face_path: Path, base_url: str) -> str:
@@ -486,11 +654,21 @@ def search_actor_names(result_dir: str | Path) -> dict:
     results = []
     errors = []
     provider = configured_provider
-    if configured_provider == DIRECT_WEB_PROVIDER:
+    if configured_provider == LOCAL_KNOWN_FACES_PROVIDER:
+        provider = LOCAL_KNOWN_FACES_PROVIDER
+        for face_path in faces:
+            results.append(_search_face_via_known_faces(face_path))
+    elif configured_provider == DIRECT_WEB_PROVIDER:
         provider = DIRECT_WEB_PROVIDER
         for face_path in faces:
             try:
-                results.append(_search_face_via_direct_web(face_path))
+                local_result = _search_face_via_known_faces(face_path)
+                if local_result.get("names"):
+                    results.append(local_result)
+                    continue
+                web_result = _search_face_via_direct_web(face_path)
+                web_result["local_known_faces"] = local_result
+                results.append(web_result)
             except Exception as exc:
                 errors.append({"file": face_path.name, "provider": provider, "error": str(exc)})
                 results.append({"file": face_path.name, "raw_result": "", "names": []})

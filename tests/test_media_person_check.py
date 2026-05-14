@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 from PIL import Image
 
 from app.approval_checks import evaluate_approval_view_model
@@ -125,6 +126,31 @@ class MediaPersonCheckTests(unittest.TestCase):
 
         self.assertEqual(result["search_results"]["provider"], "direct_web")
         self.assertIn("Константин Хабенский", result["actor_names"])
+
+    def test_local_known_faces_recognizes_actor_before_web_search(self):
+        tmp, base = make_result_dir(search_faces=None, create_faces=True)
+        try:
+            known = {
+                "people": [
+                    {
+                        "name": "Иван Ургант",
+                        "file": "known/ivan.jpg",
+                        "encoding": [0.1, 0.2, 0.3],
+                    }
+                ],
+                "errors": [],
+            }
+            with patch("app.media_person_check._load_known_face_encodings", return_value=known):
+                with patch("app.media_person_check._face_encoding_for_image", return_value=np.array([0.1, 0.2, 0.3])):
+                    with patch("app.media_person_check.face_recognition.face_distance", return_value=np.array([0.31])):
+                        with patch("app.media_person_check.requests.post") as post_mock:
+                            result = evaluate_actor_recognition(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertFalse(post_mock.called)
+        self.assertEqual(result["search_results"]["faces"][0]["provider"], "local_known_faces")
+        self.assertIn("Иван Ургант", result["actor_names"])
 
     def test_evaluate_actor_recognition_outputs_red_bold_name(self):
         tmp, base = make_result_dir(
