@@ -23,6 +23,9 @@ SERPAPI_KEY_ENV = "SERPAPI_API_KEY"
 SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
 PUBLIC_BASE_URL_ENV = "MEDIA_PERSON_PUBLIC_FACE_BASE_URL"
 PUBLIC_UPLOAD_ENDPOINT_ENV = "MEDIA_PERSON_FACE_UPLOAD_ENDPOINT"
+SEARCH_PROVIDER_ENV = "MEDIA_PERSON_SEARCH_PROVIDER"
+DIRECT_WEB_PROVIDER = "direct_web"
+SERPAPI_PROVIDER = "serpapi_google_lens"
 
 NAME_RE = re.compile(
     r"\b([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+){1,2}|[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b"
@@ -64,12 +67,17 @@ def _cache_matches_faces(cached: dict, faces: list[Path]) -> bool:
 
 
 def _configured_provider() -> str:
-    if os.getenv(SERPAPI_KEY_ENV, "").strip():
-        return "serpapi_google_lens"
+    configured = os.getenv(SEARCH_PROVIDER_ENV, "").strip().lower()
+    if configured in {DIRECT_WEB_PROVIDER, SERPAPI_PROVIDER, "endpoint", "none"}:
+        if configured == "endpoint":
+            return os.getenv(SEARCH_ENDPOINT_ENV, "").strip() or "endpoint"
+        return configured
+    if os.getenv("MEDIA_PERSON_ENABLE_SERPAPI", "").strip() == "1" and os.getenv(SERPAPI_KEY_ENV, "").strip():
+        return SERPAPI_PROVIDER
     endpoint = os.getenv(SEARCH_ENDPOINT_ENV, "").strip()
     if endpoint:
         return endpoint
-    return "not_configured"
+    return DIRECT_WEB_PROVIDER
 
 
 def extract_names_from_search_text(text: str) -> list[str]:
@@ -144,6 +152,51 @@ def _collect_serpapi_text(payload: dict) -> str:
     ):
         add(payload.get(key))
     return "\n".join(chunks)
+
+
+def _html_to_search_text(html_text: str) -> str:
+    if not html_text:
+        return ""
+    text = re.sub(r"<script\b[^>]*>.*?</script>", " ", html_text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<style\b[^>]*>.*?</style>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    text = re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), text)
+    text = re.sub(r"\\x([0-9a-fA-F]{2})", lambda m: chr(int(m.group(1), 16)), text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _direct_search_urls(image_url: str) -> list[str]:
+    quoted_url = quote(image_url, safe="")
+    return [
+        f"https://lens.google.com/uploadbyurl?url={quoted_url}",
+        f"https://www.google.com/searchbyimage?image_url={quoted_url}",
+        f"https://yandex.com/images/search?rpt=imageview&url={quoted_url}",
+        f"https://yandex.ru/images/search?rpt=imageview&url={quoted_url}",
+    ]
+
+
+def _direct_upload_search_pages(face_path: Path, headers: dict[str, str]) -> list[dict]:
+    content_type = guess_type(face_path.name)[0] or "image/jpeg"
+    urls = [
+        "https://www.google.com/searchbyimage/upload",
+        "https://www.google.ru/searchbyimage/upload",
+    ]
+    pages = []
+    for url in urls:
+        with face_path.open("rb") as fh:
+            response = requests.post(
+                url,
+                headers=headers,
+                files={"encoded_image": (face_path.name, fh, content_type)},
+                data={"image_content": "", "filename": face_path.name},
+                allow_redirects=True,
+                timeout=float(os.getenv("MEDIA_PERSON_DIRECT_WEB_TIMEOUT", "45")),
+            )
+        response.raise_for_status()
+        pages.append({"url": response.url, "text": response.text})
+    return pages
 
 
 def _dedupe_names(names: list[str]) -> list[str]:
@@ -257,12 +310,68 @@ def _search_face_via_serpapi(face_path: Path, api_key: str) -> dict:
     raw_text = _collect_serpapi_text(payload)
     return {
         "file": face_path.name,
-        "provider": "serpapi_google_lens",
+        "provider": SERPAPI_PROVIDER,
         "image_url": image_url,
         "raw_result": raw_text or json.dumps(payload, ensure_ascii=False),
         "names": _dedupe_names(
             _extract_names_from_response(payload) + extract_names_from_search_text(raw_text)
         ),
+    }
+
+
+def _search_face_via_direct_web(face_path: Path) -> dict:
+    headers = {
+        "User-Agent": os.getenv(
+            "MEDIA_PERSON_WEB_USER_AGENT",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        ),
+        "Accept-Language": os.getenv("MEDIA_PERSON_WEB_ACCEPT_LANGUAGE", "ru-RU,ru;q=0.9,en;q=0.6"),
+    }
+    chunks = []
+    errors = []
+
+    image_url = None
+    try:
+        for page in _direct_upload_search_pages(face_path, headers):
+            chunks.append(f"{page['url']}\n{_html_to_search_text(page['text'])}")
+    except Exception as exc:
+        errors.append({"provider": "google_upload", "error": str(exc)})
+
+    try:
+        image_url = _resolve_public_face_url(face_path)
+    except Exception as exc:
+        errors.append({"provider": "public_url", "error": str(exc)})
+        image_url = None
+
+    for url in _direct_search_urls(image_url) if image_url else []:
+        try:
+            response = requests.get(
+                url,
+                headers=headers,
+                allow_redirects=True,
+                timeout=float(os.getenv("MEDIA_PERSON_DIRECT_WEB_TIMEOUT", "45")),
+            )
+            response.raise_for_status()
+            chunks.append(f"{response.url}\n{_html_to_search_text(response.text)}")
+        except Exception as exc:
+            errors.append({"url": url, "error": str(exc)})
+
+    if not chunks and not image_url:
+        raise ValueError(
+            "Direct web search failed: Google image upload did not return searchable text and no public "
+            f"image URL is available. Set {PUBLIC_BASE_URL_ENV}, {PUBLIC_UPLOAD_ENDPOINT_ENV}, "
+            "or Yandex S3 static keys."
+        )
+
+    raw_text = "\n".join(chunks)
+    return {
+        "file": face_path.name,
+        "provider": DIRECT_WEB_PROVIDER,
+        "image_url": image_url,
+        "raw_result": raw_text,
+        "names": extract_names_from_search_text(raw_text),
+        "errors": errors,
     }
 
 
@@ -315,8 +424,16 @@ def search_actor_names(result_dir: str | Path) -> dict:
     results = []
     errors = []
     provider = configured_provider
-    if serpapi_key:
-        provider = "serpapi_google_lens"
+    if configured_provider == DIRECT_WEB_PROVIDER:
+        provider = DIRECT_WEB_PROVIDER
+        for face_path in faces:
+            try:
+                results.append(_search_face_via_direct_web(face_path))
+            except Exception as exc:
+                errors.append({"file": face_path.name, "provider": provider, "error": str(exc)})
+                results.append({"file": face_path.name, "raw_result": "", "names": []})
+    elif configured_provider == SERPAPI_PROVIDER and serpapi_key:
+        provider = SERPAPI_PROVIDER
         for face_path in faces:
             try:
                 results.append(_search_face_via_serpapi(face_path, serpapi_key))
@@ -333,7 +450,7 @@ def search_actor_names(result_dir: str | Path) -> dict:
                 results.append({"file": face_path.name, "raw_result": "", "names": []})
     else:
         results = [{"file": face_path.name, "raw_result": "", "names": []} for face_path in faces]
-        errors.append({"error": f"{SERPAPI_KEY_ENV} and {SEARCH_ENDPOINT_ENV} are not configured"})
+        errors.append({"error": f"{DIRECT_WEB_PROVIDER} is not available and no fallback provider is configured"})
 
     result = {
         "ok": True,
