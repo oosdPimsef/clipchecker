@@ -13,6 +13,7 @@ from app.media_person_check import (
     ACTOR_NOT_RECOGNIZED_MESSAGE,
     NO_ACTORS_MESSAGE,
     SEARCH_CACHE_NAME,
+    SEARCH_CACHE_VERSION,
     evaluate_actor_recognition,
     extract_actor_names,
     extract_names_from_search_text,
@@ -28,7 +29,15 @@ def make_result_dir(search_faces: list[dict] | None = None, create_faces: bool =
         Image.new("RGB", (120, 120), "white").save(faces / "face_001.jpg")
     if search_faces is not None:
         (base / SEARCH_CACHE_NAME).write_text(
-            json.dumps({"ok": True, "provider": "direct_web", "faces": search_faces}, ensure_ascii=False),
+            json.dumps(
+                {
+                    "ok": True,
+                    "cache_version": SEARCH_CACHE_VERSION,
+                    "provider": "direct_web",
+                    "faces": search_faces,
+                },
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
     return tmp, base
@@ -38,6 +47,14 @@ class MediaPersonCheckTests(unittest.TestCase):
     def test_extract_names_from_search_text(self):
         self.assertEqual(extract_names_from_search_text("Иван Ургант 98%"), ["Иван Ургант"])
         self.assertEqual(extract_names_from_search_text("not found"), [])
+
+    def test_extract_names_from_search_text_ignores_google_ui_noise(self):
+        text = (
+            "Google Search; Deutsch English; Cymraeg Dansk Deutsch; English United Kingdom; "
+            "English United States; France Gaeilge; Hrvatski Indonesia; Italiano Kiswahili; "
+            "Melayu Nederlands; Suomi Svenska; Конфиденциальность Условия Политика"
+        )
+        self.assertEqual(extract_names_from_search_text(text), [])
 
     def test_extract_actor_names_from_cached_search(self):
         result = {"faces": [{"file": "face_001.jpg", "raw_result": "Иван Ургант", "names": ["Иван Ургант"]}]}

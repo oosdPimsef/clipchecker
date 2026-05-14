@@ -18,6 +18,7 @@ import requests
 NO_ACTORS_MESSAGE = "Актеров в ролике нет"
 ACTOR_NOT_RECOGNIZED_MESSAGE = "Актер не распознан"
 SEARCH_CACHE_NAME = "Actor_Web_Search_Results.json"
+SEARCH_CACHE_VERSION = 2
 SEARCH_ENDPOINT_ENV = "MEDIA_PERSON_WEB_SEARCH_ENDPOINT"
 SERPAPI_KEY_ENV = "SERPAPI_API_KEY"
 SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
@@ -34,6 +35,47 @@ NEGATIVE_RESULT_RE = re.compile(
     r"(?:не\s+установлен|не\s+найден|нет\s+совпад|unknown|not\s+found|no\s+match)",
     flags=re.IGNORECASE,
 )
+NON_PERSON_WORDS = {
+    "google",
+    "search",
+    "english",
+    "deutsch",
+    "cymraeg",
+    "dansk",
+    "france",
+    "gaeilge",
+    "hrvatski",
+    "indonesia",
+    "italiano",
+    "kiswahili",
+    "melayu",
+    "nederlands",
+    "suomi",
+    "svenska",
+    "united",
+    "kingdom",
+    "states",
+    "privacy",
+    "terms",
+    "policy",
+    "конфиденциальность",
+    "условия",
+    "политика",
+    "поиск",
+    "картинки",
+    "изображения",
+    "википедия",
+    "фото",
+}
+NON_PERSON_PHRASES = {
+    "google search",
+    "deutsch english",
+    "english united",
+    "united kingdom",
+    "united states",
+    "конфиденциальность условия",
+    "условия политика",
+}
 
 
 def _read_json(path: Path) -> dict | None:
@@ -61,6 +103,8 @@ def _face_files(faces_dir: Path) -> list[Path]:
 
 
 def _cache_matches_faces(cached: dict, faces: list[Path]) -> bool:
+    if cached.get("cache_version") != SEARCH_CACHE_VERSION:
+        return False
     cached_names = sorted(str(item.get("file", "")) for item in cached.get("faces", []))
     current_names = sorted(path.name for path in faces)
     return cached_names == current_names
@@ -92,11 +136,28 @@ def extract_names_from_search_text(text: str) -> list[str]:
     seen = set()
     for candidate in NAME_RE.findall(cleaned):
         name = re.sub(r"\s+", " ", candidate).strip(" -:;,")
+        if not _looks_like_person_name(name):
+            continue
         key = name.lower().replace("ё", "е")
         if name and key not in seen:
             seen.add(key)
             names.append(name)
     return names
+
+
+def _looks_like_person_name(name: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(name).strip()).lower().replace("ё", "е")
+    if not normalized:
+        return False
+    if normalized in NON_PERSON_PHRASES:
+        return False
+
+    tokens = re.findall(r"[a-zа-яё]+", normalized, flags=re.IGNORECASE)
+    if len(tokens) < 2 or len(tokens) > 3:
+        return False
+    if any(token in NON_PERSON_WORDS for token in tokens):
+        return False
+    return True
 
 
 def _extract_names_from_response(data) -> list[str]:
@@ -412,6 +473,7 @@ def search_actor_names(result_dir: str | Path) -> dict:
     if not faces:
         result = {
             "ok": True,
+            "cache_version": SEARCH_CACHE_VERSION,
             "searched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "provider": "none",
             "faces": [],
@@ -454,6 +516,7 @@ def search_actor_names(result_dir: str | Path) -> dict:
 
     result = {
         "ok": True,
+        "cache_version": SEARCH_CACHE_VERSION,
         "searched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "provider": provider,
         "faces": results,
