@@ -17,6 +17,7 @@ from app.media_person_check import (
     SEARCH_CACHE_VERSION,
     _analysis_face_files,
     _face_signature,
+    _known_faces_signature,
     evaluate_actor_recognition,
     extract_actor_names,
     extract_names_from_search_text,
@@ -37,6 +38,7 @@ def make_result_dir(search_faces: list[dict] | None = None, create_faces: bool =
                     "ok": True,
                     "cache_version": SEARCH_CACHE_VERSION,
                     "face_signature": _face_signature(_analysis_face_files(base)),
+                    "known_faces_signature": _known_faces_signature(),
                     "provider": "direct_web",
                     "faces": search_faces,
                 },
@@ -97,6 +99,38 @@ class MediaPersonCheckTests(unittest.TestCase):
         self.assertEqual(result["status"], "pass")
         self.assertEqual(result["message"], ACTOR_NOT_RECOGNIZED_MESSAGE)
         self.assertEqual([face["file"] for face in result["search_results"]["faces"]], ["face_001.jpg"])
+
+    def test_cache_is_ignored_when_known_faces_database_changes(self):
+        tmp, base = make_result_dir(search_faces=None, create_faces=True)
+        cache_path = base / SEARCH_CACHE_NAME
+        cache_path.write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "cache_version": SEARCH_CACHE_VERSION,
+                    "face_signature": _face_signature(_analysis_face_files(base)),
+                    "known_faces_signature": [{"path": "old.jpg", "mtime": 1, "size": 1}],
+                    "provider": "direct_web",
+                    "faces": [{"file": "face_001.jpg", "raw_result": "", "names": []}],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        try:
+            known = {
+                "people": [{"name": "Марина Кравец", "file": "known/marina.jpg", "encoding": [0.1, 0.2, 0.3]}],
+                "errors": [],
+            }
+            with patch("app.media_person_check._known_faces_signature", return_value=[{"path": "new.jpg", "mtime": 2, "size": 2}]):
+                with patch("app.media_person_check._load_known_face_encodings", return_value=known):
+                    with patch("app.media_person_check._face_encoding_for_image", return_value=np.array([0.1, 0.2, 0.3])):
+                        with patch("app.media_person_check.face_recognition.face_distance", return_value=np.array([0.31])):
+                            result = evaluate_actor_recognition(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertIn("Марина Кравец", result["actor_names"])
 
     def test_faces_thumbnails_pdf_pages_are_used_as_separate_faces(self):
         tmp = tempfile.TemporaryDirectory()

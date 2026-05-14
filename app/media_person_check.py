@@ -29,7 +29,7 @@ except Exception:  # pragma: no cover - optional runtime dependency
 NO_ACTORS_MESSAGE = "Актеров в ролике нет"
 ACTOR_NOT_RECOGNIZED_MESSAGE = "Актер не распознан"
 SEARCH_CACHE_NAME = "Actor_Web_Search_Results.json"
-SEARCH_CACHE_VERSION = 3
+SEARCH_CACHE_VERSION = 4
 KNOWN_FACES_CACHE_NAME = "Known_Faces_Encodings.json"
 FACES_THUMBNAILS_PDF_NAME = "Faces_Thumbnails.pdf"
 FACES_FROM_PDF_DIR_NAME = "faces_from_pdf"
@@ -165,10 +165,16 @@ def _known_faces_dir() -> Path:
     return Path(os.getenv(KNOWN_FACES_DIR_ENV, DEFAULT_KNOWN_FACES_DIR))
 
 
+def _known_faces_signature() -> list[dict]:
+    return _reference_signature(_known_reference_files(_known_faces_dir()))
+
+
 def _cache_matches_faces(cached: dict, faces: list[Path]) -> bool:
     if cached.get("cache_version") != SEARCH_CACHE_VERSION:
         return False
     if cached.get("face_signature") != _face_signature(faces):
+        return False
+    if cached.get("known_faces_signature") != _known_faces_signature():
         return False
     cached_names = sorted(str(item.get("file", "")) for item in cached.get("faces", []))
     current_names = sorted(path.name for path in faces)
@@ -694,6 +700,7 @@ def search_actor_names(result_dir: str | Path) -> dict:
             "ok": True,
             "cache_version": SEARCH_CACHE_VERSION,
             "face_signature": [],
+            "known_faces_signature": _known_faces_signature(),
             "searched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "provider": "none",
             "faces": [],
@@ -748,6 +755,7 @@ def search_actor_names(result_dir: str | Path) -> dict:
         "ok": True,
         "cache_version": SEARCH_CACHE_VERSION,
         "face_signature": _face_signature(faces),
+        "known_faces_signature": _known_faces_signature(),
         "searched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "provider": provider,
         "faces": results,
