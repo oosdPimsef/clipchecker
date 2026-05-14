@@ -8,7 +8,9 @@ import json
 import os
 import re
 import time
+from mimetypes import guess_type
 from pathlib import Path
+from urllib.parse import quote
 
 import requests
 
@@ -17,6 +19,10 @@ NO_ACTORS_MESSAGE = "Актеров в ролике нет"
 ACTOR_NOT_RECOGNIZED_MESSAGE = "Актер не распознан"
 SEARCH_CACHE_NAME = "Actor_Web_Search_Results.json"
 SEARCH_ENDPOINT_ENV = "MEDIA_PERSON_WEB_SEARCH_ENDPOINT"
+SERPAPI_KEY_ENV = "SERPAPI_API_KEY"
+SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
+PUBLIC_BASE_URL_ENV = "MEDIA_PERSON_PUBLIC_FACE_BASE_URL"
+PUBLIC_UPLOAD_ENDPOINT_ENV = "MEDIA_PERSON_FACE_UPLOAD_ENDPOINT"
 
 NAME_RE = re.compile(
     r"\b([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+){1,2}|[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b"
@@ -55,6 +61,15 @@ def _cache_matches_faces(cached: dict, faces: list[Path]) -> bool:
     cached_names = sorted(str(item.get("file", "")) for item in cached.get("faces", []))
     current_names = sorted(path.name for path in faces)
     return cached_names == current_names
+
+
+def _configured_provider() -> str:
+    if os.getenv(SERPAPI_KEY_ENV, "").strip():
+        return "serpapi_google_lens"
+    endpoint = os.getenv(SEARCH_ENDPOINT_ENV, "").strip()
+    if endpoint:
+        return endpoint
+    return "not_configured"
 
 
 def extract_names_from_search_text(text: str) -> list[str]:
@@ -96,6 +111,41 @@ def _extract_names_from_response(data) -> list[str]:
     return []
 
 
+def _collect_serpapi_text(payload: dict) -> str:
+    chunks = []
+
+    def add(value) -> None:
+        if value is None:
+            return
+        if isinstance(value, str):
+            chunks.append(value)
+        elif isinstance(value, dict):
+            for key in (
+                "title",
+                "name",
+                "source",
+                "snippet",
+                "description",
+                "displayed_link",
+                "link",
+            ):
+                add(value.get(key))
+        elif isinstance(value, list):
+            for item in value:
+                add(item)
+
+    for key in (
+        "knowledge_graph",
+        "visual_matches",
+        "exact_matches",
+        "image_results",
+        "related_content",
+        "organic_results",
+    ):
+        add(payload.get(key))
+    return "\n".join(chunks)
+
+
 def _dedupe_names(names: list[str]) -> list[str]:
     out = []
     seen = set()
@@ -106,6 +156,114 @@ def _dedupe_names(names: list[str]) -> list[str]:
             seen.add(key)
             out.append(normalized)
     return out
+
+
+def _public_url_from_base(face_path: Path, base_url: str) -> str:
+    return f"{base_url.rstrip('/')}/{quote(face_path.name)}"
+
+
+def _upload_face_to_endpoint(face_path: Path, endpoint: str) -> str:
+    content_type = guess_type(face_path.name)[0] or "application/octet-stream"
+    with face_path.open("rb") as fh:
+        response = requests.post(
+            endpoint,
+            files={"image": (face_path.name, fh, content_type)},
+            timeout=float(os.getenv("MEDIA_PERSON_FACE_UPLOAD_TIMEOUT", "45")),
+        )
+    response.raise_for_status()
+    payload = response.json()
+    for key in ("url", "image_url", "public_url", "link"):
+        value = payload.get(key)
+        if value:
+            return str(value)
+    raise ValueError(f"{PUBLIC_UPLOAD_ENDPOINT_ENV} did not return public image url")
+
+
+def _upload_face_to_yandex_object_storage(face_path: Path) -> str | None:
+    bucket = os.getenv("YANDEX_BUCKET", "").strip()
+    access_key = (
+        os.getenv("YANDEX_S3_ACCESS_KEY_ID", "").strip()
+        or os.getenv("AWS_ACCESS_KEY_ID", "").strip()
+    )
+    secret_key = (
+        os.getenv("YANDEX_S3_SECRET_ACCESS_KEY", "").strip()
+        or os.getenv("AWS_SECRET_ACCESS_KEY", "").strip()
+    )
+    if not bucket or not access_key or not secret_key:
+        return None
+
+    try:
+        import boto3  # type: ignore
+    except Exception:
+        return None
+
+    key_prefix = os.getenv("MEDIA_PERSON_YANDEX_OBJECT_PREFIX", "clipchecker/faces").strip("/")
+    object_key = f"{key_prefix}/{int(time.time())}_{face_path.name}"
+    content_type = guess_type(face_path.name)[0] or "application/octet-stream"
+    client = boto3.client(
+        "s3",
+        endpoint_url=os.getenv("YANDEX_S3_ENDPOINT", "https://storage.yandexcloud.net"),
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+    )
+    extra_args = {"ContentType": content_type}
+    if os.getenv("MEDIA_PERSON_YANDEX_PUBLIC_READ", "1") != "0":
+        extra_args["ACL"] = "public-read"
+    client.upload_file(str(face_path), bucket, object_key, ExtraArgs=extra_args)
+    public_base = os.getenv("YANDEX_PUBLIC_BUCKET_URL", f"https://storage.yandexcloud.net/{bucket}")
+    return f"{public_base.rstrip('/')}/{quote(object_key)}"
+
+
+def _resolve_public_face_url(face_path: Path) -> str | None:
+    base_url = os.getenv(PUBLIC_BASE_URL_ENV, "").strip()
+    if base_url:
+        return _public_url_from_base(face_path, base_url)
+
+    upload_endpoint = os.getenv(PUBLIC_UPLOAD_ENDPOINT_ENV, "").strip()
+    if upload_endpoint:
+        return _upload_face_to_endpoint(face_path, upload_endpoint)
+
+    return _upload_face_to_yandex_object_storage(face_path)
+
+
+def _search_face_via_serpapi(face_path: Path, api_key: str) -> dict:
+    image_url = _resolve_public_face_url(face_path)
+    if not image_url:
+        raise ValueError(
+            f"{SERPAPI_KEY_ENV} is configured, but no public image URL source is configured. "
+            f"Set {PUBLIC_BASE_URL_ENV}, {PUBLIC_UPLOAD_ENDPOINT_ENV}, or Yandex S3 static keys."
+        )
+
+    params = {
+        "engine": "google_lens",
+        "api_key": api_key,
+        "url": image_url,
+        "type": os.getenv("MEDIA_PERSON_SERPAPI_TYPE", "all"),
+        "hl": os.getenv("MEDIA_PERSON_SERPAPI_HL", "ru"),
+        "country": os.getenv("MEDIA_PERSON_SERPAPI_COUNTRY", "ru"),
+        "safe": os.getenv("MEDIA_PERSON_SERPAPI_SAFE", "active"),
+    }
+    query = os.getenv("MEDIA_PERSON_SERPAPI_QUERY", "актёр знаменитость телеведущий")
+    if query:
+        params["q"] = query
+
+    response = requests.get(
+        SERPAPI_ENDPOINT,
+        params=params,
+        timeout=float(os.getenv("MEDIA_PERSON_SERPAPI_TIMEOUT", "60")),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    raw_text = _collect_serpapi_text(payload)
+    return {
+        "file": face_path.name,
+        "provider": "serpapi_google_lens",
+        "image_url": image_url,
+        "raw_result": raw_text or json.dumps(payload, ensure_ascii=False),
+        "names": _dedupe_names(
+            _extract_names_from_response(payload) + extract_names_from_search_text(raw_text)
+        ),
+    }
 
 
 def _search_face_via_endpoint(face_path: Path, endpoint: str) -> dict:
@@ -132,8 +290,14 @@ def search_actor_names(result_dir: str | Path) -> dict:
     base = Path(result_dir)
     cache_path = base / SEARCH_CACHE_NAME
     faces = _face_files(base / "faces")
+    configured_provider = _configured_provider()
     cached = _read_json(cache_path)
-    if cached and cached.get("ok") and _cache_matches_faces(cached, faces):
+    if (
+        cached
+        and cached.get("ok")
+        and cached.get("provider") == configured_provider
+        and _cache_matches_faces(cached, faces)
+    ):
         return cached
 
     if not faces:
@@ -147,23 +311,34 @@ def search_actor_names(result_dir: str | Path) -> dict:
         return result
 
     endpoint = os.getenv(SEARCH_ENDPOINT_ENV, "").strip()
+    serpapi_key = os.getenv(SERPAPI_KEY_ENV, "").strip()
     results = []
     errors = []
-    if endpoint:
+    provider = configured_provider
+    if serpapi_key:
+        provider = "serpapi_google_lens"
+        for face_path in faces:
+            try:
+                results.append(_search_face_via_serpapi(face_path, serpapi_key))
+            except Exception as exc:
+                errors.append({"file": face_path.name, "provider": provider, "error": str(exc)})
+                results.append({"file": face_path.name, "raw_result": "", "names": []})
+    elif endpoint:
+        provider = endpoint
         for face_path in faces:
             try:
                 results.append(_search_face_via_endpoint(face_path, endpoint))
             except Exception as exc:
-                errors.append({"file": face_path.name, "error": str(exc)})
+                errors.append({"file": face_path.name, "provider": "endpoint", "error": str(exc)})
                 results.append({"file": face_path.name, "raw_result": "", "names": []})
     else:
         results = [{"file": face_path.name, "raw_result": "", "names": []} for face_path in faces]
-        errors.append({"error": f"{SEARCH_ENDPOINT_ENV} is not configured"})
+        errors.append({"error": f"{SERPAPI_KEY_ENV} and {SEARCH_ENDPOINT_ENV} are not configured"})
 
     result = {
         "ok": True,
         "searched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "provider": endpoint or "not_configured",
+        "provider": provider,
         "faces": results,
         "errors": errors,
     }

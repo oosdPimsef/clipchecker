@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -27,7 +28,7 @@ def make_result_dir(search_faces: list[dict] | None = None, create_faces: bool =
         Image.new("RGB", (120, 120), "white").save(faces / "face_001.jpg")
     if search_faces is not None:
         (base / SEARCH_CACHE_NAME).write_text(
-            json.dumps({"ok": True, "provider": "test", "faces": search_faces}, ensure_ascii=False),
+            json.dumps({"ok": True, "provider": "not_configured", "faces": search_faces}, ensure_ascii=False),
             encoding="utf-8",
         )
     return tmp, base
@@ -75,6 +76,27 @@ class MediaPersonCheckTests(unittest.TestCase):
         self.assertEqual(result["status"], "pass")
         self.assertEqual(result["message"], ACTOR_NOT_RECOGNIZED_MESSAGE)
         self.assertEqual([face["file"] for face in result["search_results"]["faces"]], ["face_001.jpg"])
+
+    def test_cache_is_ignored_when_serpapi_becomes_configured(self):
+        tmp, base = make_result_dir(
+            search_faces=[{"file": "face_001.jpg", "raw_result": "", "names": []}],
+            create_faces=True,
+        )
+        try:
+            with patch.dict("os.environ", {"SERPAPI_API_KEY": "test-key"}, clear=False):
+                with patch("app.media_person_check._resolve_public_face_url", return_value="https://example.com/face.jpg"):
+                    with patch("app.media_person_check.requests.get") as get_mock:
+                        get_mock.return_value.headers = {"content-type": "application/json"}
+                        get_mock.return_value.raise_for_status.return_value = None
+                        get_mock.return_value.json.return_value = {
+                            "visual_matches": [{"title": "Иван Ургант - Википедия"}]
+                        }
+                        result = evaluate_actor_recognition(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["search_results"]["provider"], "serpapi_google_lens")
+        self.assertIn("Иван Ургант", result["actor_names"])
 
     def test_evaluate_actor_recognition_outputs_red_bold_name(self):
         tmp, base = make_result_dir(

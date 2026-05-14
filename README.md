@@ -92,6 +92,16 @@ OpenAI/ChatGPT временно отключён по умолчанию, что
 ENABLE_OPENAI=1
 ```
 
+## SerpApi для id=14
+
+Проверка `id=14` автоматически использует SerpApi Google Lens, если в `.env` задан `SERPAPI_API_KEY`. SerpApi принимает только публичный URL изображения, поэтому перед поиском лицо из `Clipchecker_materials/faces` должно быть опубликовано одним из способов:
+
+- `MEDIA_PERSON_PUBLIC_FACE_BASE_URL`: публичная базовая ссылка на папку с файлами лиц; программа добавит к ней имя файла.
+- `MEDIA_PERSON_FACE_UPLOAD_ENDPOINT`: внутренний upload-endpoint, который принимает multipart-поле `image` и возвращает JSON с `url`, `image_url`, `public_url` или `link`.
+- Yandex Object Storage: нужны `YANDEX_BUCKET` и S3 static keys `YANDEX_S3_ACCESS_KEY_ID` / `YANDEX_S3_SECRET_ACCESS_KEY` или стандартные `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`. При наличии `boto3` файл будет временно загружен в бакет и передан в SerpApi по публичной ссылке.
+
+Если `SERPAPI_API_KEY` есть, но публичный URL для лица получить нельзя, пункт `id=14` останется зелёным с сообщением `Актер не распознан`, а причина будет записана в `Actor_Web_Search_Results.json`.
+
 ## Секреты и артефакты
 
 В GitHub не отправляются `.env`, Telegram session, логи, сгенерированные материалы анализа, локальные архивные копии и бинарная папка `ffmpeg`.
