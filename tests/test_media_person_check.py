@@ -5,94 +5,89 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from PIL import Image
+
 from app.approval_checks import evaluate_approval_view_model
 from app.media_person_check import (
-    CONTRACT_FOUND_MESSAGE,
-    CONTRACT_REQUIRED_MESSAGE,
-    NO_MEDIA_PERSONS_MESSAGE,
+    ACTOR_NOT_RECOGNIZED_MESSAGE,
+    NO_ACTORS_MESSAGE,
     SEARCH_CACHE_NAME,
-    evaluate_media_person_contracts,
-    extract_media_person_names_from_text,
-    find_contracts_for_person,
+    evaluate_actor_recognition,
+    extract_actor_names,
+    extract_names_from_search_text,
 )
 
 
-def make_result_dir(search_faces: list[dict] | None = None, documents_text: str = ""):
+def make_result_dir(search_faces: list[dict] | None = None, create_faces: bool = False):
     tmp = tempfile.TemporaryDirectory()
     base = Path(tmp.name)
+    if create_faces:
+        faces = base / "faces"
+        faces.mkdir()
+        Image.new("RGB", (120, 120), "white").save(faces / "face_001.jpg")
     if search_faces is not None:
         (base / SEARCH_CACHE_NAME).write_text(
-            json.dumps({"ok": True, "pending": False, "faces": search_faces}, ensure_ascii=False),
+            json.dumps({"ok": True, "provider": "test", "faces": search_faces}, ensure_ascii=False),
             encoding="utf-8",
         )
-    if documents_text:
-        (base / "Documents_Texts.txt").write_text(documents_text, encoding="utf-8")
     return tmp, base
 
 
 class MediaPersonCheckTests(unittest.TestCase):
-    def test_extract_media_person_names_from_text(self):
-        self.assertEqual(extract_media_person_names_from_text("face: Иван Ургант 98%"), ["Иван Ургант"])
-        self.assertEqual(extract_media_person_names_from_text("Публичная личность не установлена"), [])
+    def test_extract_names_from_search_text(self):
+        self.assertEqual(extract_names_from_search_text("Иван Ургант 98%"), ["Иван Ургант"])
+        self.assertEqual(extract_names_from_search_text("not found"), [])
 
-    def test_find_contracts_for_person_by_surname(self):
-        documents = (
-            "Документ 1. Договор_Ургант.pdf\n"
-            "Договор оказания услуг с Иваном Ургантом.\n\n"
-            "Документ 2. Письмо.txt\n"
-            "Обычное письмо."
-        )
-        self.assertEqual(find_contracts_for_person("Иван Ургант", documents), ["Договор_Ургант.pdf"])
+    def test_extract_actor_names_from_cached_search(self):
+        result = {"faces": [{"file": "face_001.jpg", "raw_result": "Иван Ургант", "names": ["Иван Ургант"]}]}
+        self.assertEqual(extract_actor_names(result), ["Иван Ургант"])
 
-    def test_evaluate_media_person_contracts_fails_when_contract_missing(self):
-        tmp, base = make_result_dir(
-            search_faces=[{"file": "face_001.jpg", "raw_result": "Иван Ургант", "names": ["Иван Ургант"]}],
-            documents_text="Документ 1. Письмо.txt\nМатериалы к ролику.",
-        )
+    def test_evaluate_actor_recognition_passes_when_no_faces(self):
+        tmp, base = make_result_dir(search_faces=[])
         try:
-            result = evaluate_media_person_contracts(base)
-        finally:
-            tmp.cleanup()
-
-        self.assertEqual(result["status"], "fail")
-        self.assertIn(CONTRACT_REQUIRED_MESSAGE, result["message"])
-        self.assertIn('<strong class="media-person-name">Иван Ургант</strong>', result["message_html"])
-
-    def test_evaluate_media_person_contracts_passes_when_contract_found(self):
-        tmp, base = make_result_dir(
-            search_faces=[{"file": "face_001.jpg", "raw_result": "Иван Ургант", "names": ["Иван Ургант"]}],
-            documents_text="Документ 1. Договор_Ургант.pdf\nДоговор с Иваном Ургантом.",
-        )
-        try:
-            result = evaluate_media_person_contracts(base)
+            result = evaluate_actor_recognition(base)
         finally:
             tmp.cleanup()
 
         self.assertEqual(result["status"], "pass")
-        self.assertIn(CONTRACT_FOUND_MESSAGE, result["message"])
-        self.assertIn('<strong class="media-person-name">Иван Ургант</strong>', result["message_html"])
+        self.assertEqual(result["message"], NO_ACTORS_MESSAGE)
 
-    def test_evaluate_media_person_contracts_passes_when_persons_not_found(self):
+    def test_evaluate_actor_recognition_passes_when_actor_not_recognized(self):
         tmp, base = make_result_dir(
-            search_faces=[{"file": "face_001.jpg", "raw_result": "Публичная личность не установлена", "names": []}],
+            search_faces=[{"file": "face_001.jpg", "raw_result": "", "names": []}],
+            create_faces=True,
         )
         try:
-            result = evaluate_media_person_contracts(base)
+            result = evaluate_actor_recognition(base)
         finally:
             tmp.cleanup()
 
         self.assertEqual(result["status"], "pass")
-        self.assertEqual(result["message"], NO_MEDIA_PERSONS_MESSAGE)
+        self.assertEqual(result["message"], ACTOR_NOT_RECOGNIZED_MESSAGE)
+
+    def test_evaluate_actor_recognition_outputs_red_bold_name(self):
+        tmp, base = make_result_dir(
+            search_faces=[{"file": "face_001.jpg", "raw_result": "Иван Ургант", "names": ["Иван Ургант"]}],
+            create_faces=True,
+        )
+        try:
+            result = evaluate_actor_recognition(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertIn("Иван Ургант", result["message"])
+        self.assertIn('<strong class="media-person-name">Иван Ургант</strong>', result["message_html"])
 
     def test_evaluates_item_id_14_inside_view_model(self):
         tmp, base = make_result_dir(
             search_faces=[{"file": "face_001.jpg", "raw_result": "Иван Ургант", "names": ["Иван Ургант"]}],
-            documents_text="Документ 1. Договор_Ургант.pdf\nДоговор с Иваном Ургантом.",
+            create_faces=True,
         )
         view_model = {
             "ok": True,
             "blocks": [
-                {"name": "Видеоряд", "items": [{"id": "14", "number": "14", "text": "договор с медийной личностью"}]},
+                {"name": "Видеоряд", "items": [{"id": "14", "number": "14", "text": "актеры в ролике"}]},
             ],
         }
         try:
@@ -102,7 +97,7 @@ class MediaPersonCheckTests(unittest.TestCase):
 
         item = evaluated["blocks"][0]["items"][0]
         self.assertEqual(item["status"], "pass")
-        self.assertIn(CONTRACT_FOUND_MESSAGE, item["message"])
+        self.assertIn('<strong class="media-person-name">Иван Ургант</strong>', item["message_html"])
 
 
 if __name__ == "__main__":
