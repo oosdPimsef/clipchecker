@@ -37,7 +37,7 @@ DIRECT_WEB_PROVIDER = "direct_web"
 LOCAL_KNOWN_FACES_PROVIDER = "local_known_faces"
 SERPAPI_PROVIDER = "serpapi_google_lens"
 DEFAULT_KNOWN_FACES_DIR = (
-    r"C:\Users\PTambulatov\Desktop\PT\2.Расчеты\50. ХАКАТОН\7. face recognition\known_faces"
+    r"C:\Users\PTambulatov\Desktop\PT\2.Расчеты\50. ХАКАТОН\7. face recognition"
 )
 
 NAME_RE = re.compile(
@@ -146,6 +146,8 @@ def extract_names_from_search_text(text: str) -> list[str]:
     cleaned = re.sub(r"https?://\S+", " ", text)
     cleaned = re.sub(r"\b\d{1,3}(?:[.,]\d+)?\s*%", " ", cleaned)
     cleaned = re.sub(r"[_*`[\](){}<>|]+", " ", cleaned)
+    for noise_word in NON_PERSON_WORDS:
+        cleaned = re.sub(rf"\b{re.escape(noise_word)}\b", " ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
     names = []

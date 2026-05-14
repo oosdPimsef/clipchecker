@@ -99,18 +99,16 @@ ENABLE_OPENAI=1
 Локальная база медийных лиц по умолчанию ожидается здесь:
 
 ```text
-C:\Users\PTambulatov\Desktop\PT\2.Расчеты\50. ХАКАТОН\7. face recognition\known_faces
+C:\Users\PTambulatov\Desktop\PT\2.Расчеты\50. ХАКАТОН\7. face recognition
 ```
 
-Структура базы:
+Структура базы плоская: фото лежат прямо в этой папке, имя файла является именем медийной личности.
 
 ```text
-known_faces\
-  Иван Ургант\
-    1.jpg
-    2.jpg
-  Константин Хабенский\
-    portrait.jpg
+C:\Users\PTambulatov\Desktop\PT\2.Расчеты\50. ХАКАТОН\7. face recognition\
+  Иван Ургант.jpg
+  Лариса Гузеева.jpeg
+  Константин Хабенский.jpg
 ```
 
 Путь можно переопределить через `MEDIA_PERSON_KNOWN_FACES_DIR`. Порог совпадения задаётся `MEDIA_PERSON_KNOWN_FACE_TOLERANCE`, по умолчанию `0.5`. Чем ниже значение, тем строже сравнение.
