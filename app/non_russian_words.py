@@ -6,6 +6,7 @@ from __future__ import annotations
 import html
 import re
 from pathlib import Path
+from typing import Any
 
 try:
     from foreign_words import analyze_star_translations
@@ -50,6 +51,22 @@ COMMON_RUSSIAN_WORDS = {
     "товары",
     "условия",
     "участвующие",
+}
+IGNORED_CYRILLIC_WORDS = {
+    "ао",
+    "зао",
+    "инн",
+    "кпп",
+    "оао",
+    "огрн",
+    "ооо",
+    "пао",
+    "пр",
+    "пр-д",
+    "пр-зд",
+    "рф",
+    "стр",
+    "тел",
 }
 ANGLICISM_TERMS = {
     "айфон",
@@ -127,6 +144,8 @@ ANGLICISM_PARTS = (
     "фэшн",
     "хайп",
 )
+_MORPH_ANALYZER: Any | None = None
+_MORPH_LOAD_ATTEMPTED = False
 LATIN_TO_CYRILLIC_OCR = str.maketrans(
     {
         "A": "А",
@@ -163,11 +182,61 @@ def _has_cyrillic(word: str) -> bool:
     return bool(re.search(r"[А-Яа-яЁё]", word))
 
 
+def get_morph_analyzer():
+    global _MORPH_ANALYZER, _MORPH_LOAD_ATTEMPTED
+    if _MORPH_LOAD_ATTEMPTED:
+        return _MORPH_ANALYZER
+    _MORPH_LOAD_ATTEMPTED = True
+    try:
+        import pymorphy3
+
+        _MORPH_ANALYZER = pymorphy3.MorphAnalyzer()
+    except Exception:
+        _MORPH_ANALYZER = None
+    return _MORPH_ANALYZER
+
+
+def morphology_available() -> bool:
+    return get_morph_analyzer() is not None
+
+
+def is_russian_dictionary_word(word: str) -> bool | None:
+    morph = get_morph_analyzer()
+    if morph is None:
+        return None
+    normalized = _normalize_word(word)
+    if not normalized or not _has_cyrillic(normalized) or _has_latin(normalized):
+        return None
+    try:
+        return any(getattr(parse, "is_known", False) for parse in morph.parse(normalized))
+    except Exception:
+        return None
+
+
+def _is_known_cyrillic_part(part: str) -> bool:
+    normalized = _normalize_word(part)
+    if normalized in COMMON_RUSSIAN_WORDS or normalized in IGNORED_CYRILLIC_WORDS:
+        return True
+    result = is_russian_dictionary_word(normalized)
+    return result is True
+
+
+def _is_known_hyphenated_cyrillic(word: str) -> bool:
+    if "-" not in word or _has_latin(word):
+        return False
+    parts = [part for part in re.split(r"-+", word) if part]
+    if len(parts) < 2:
+        return False
+    return all(_is_known_cyrillic_part(part) for part in parts)
+
+
 def _is_ignored_token(word: str) -> bool:
     normalized = _normalize_word(word)
     if len(normalized) <= 1:
         return True
-    if normalized in IGNORED_LATIN_WORDS or normalized in COMMON_RUSSIAN_WORDS:
+    if normalized in IGNORED_LATIN_WORDS or normalized in COMMON_RUSSIAN_WORDS or normalized in IGNORED_CYRILLIC_WORDS:
+        return True
+    if _is_known_hyphenated_cyrillic(word):
         return True
     if re.fullmatch(r"[ivxlcdm]+", normalized):
         return True
@@ -195,8 +264,12 @@ def classify_non_russian_word(word: str) -> str | None:
     if any(part in normalized for part in ANGLICISM_PARTS):
         return "англицизм/неологизм"
 
-    # A conservative OCR-friendly signal for invented words: repeated uncommon
-    # consonant clusters in Cyrillic. This avoids marking all brand names.
+    dictionary_result = is_russian_dictionary_word(word)
+    if dictionary_result is False and len(normalized) >= 4:
+        return "не найдено в русском морфологическом словаре"
+
+    # Fallback without pymorphy3: conservative OCR-friendly signal for invented
+    # words. This avoids marking all brand names when dictionary is unavailable.
     if len(normalized) >= 8 and re.search(r"[бвгджзйклмнпрстфхцчшщ]{5,}", normalized):
         return "похоже на придуманное слово или OCR-шум"
 
@@ -246,6 +319,7 @@ def analyze_non_russian_words(ocr_data: dict) -> dict:
         "non_russian_word_count": total,
         "non_russian_words": list(grouped.values()),
         "dictionary_size": len(ANGLICISM_TERMS),
+        "morphology_enabled": morphology_available(),
     }
 
 

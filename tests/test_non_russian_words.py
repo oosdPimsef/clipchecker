@@ -14,6 +14,8 @@ from app.non_russian_words import (
     evaluate_non_russian_words_translation,
     extract_non_russian_words,
     filter_star_translations_for_words,
+    is_russian_dictionary_word,
+    morphology_available,
 )
 
 
@@ -67,6 +69,17 @@ class NonRussianWordsTests(unittest.TestCase):
         self.assertIsNone(classify_non_russian_word("скидка"))
         self.assertIsNone(classify_non_russian_word("BCE"))
         self.assertIsNone(classify_non_russian_word("HA"))
+        self.assertIsNone(classify_non_russian_word("ОГРН"))
+        self.assertIsNone(classify_non_russian_word("пр-зд"))
+        self.assertIsNone(classify_non_russian_word("товаров-исключений"))
+
+    def test_morphology_dictionary_recognizes_russian_inflections(self):
+        self.assertTrue(morphology_available())
+        self.assertTrue(is_russian_dictionary_word("продажам"))
+        self.assertTrue(is_russian_dictionary_word("товарами"))
+
+    def test_morphology_dictionary_flags_unknown_cyrillic_word(self):
+        self.assertEqual(classify_non_russian_word("фывапролдж"), "не найдено в русском морфологическом словаре")
 
     def test_extracts_non_russian_words(self):
         words = extract_non_russian_words("Скидка sale и кэшбэк")
