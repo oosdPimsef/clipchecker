@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -103,6 +104,16 @@ def make_result_dir(ocr_log: dict):
 
 
 class FrameSafetyTests(unittest.TestCase):
+    def setUp(self):
+        self.cv_patcher = patch(
+            "app.frame_safety.detect_cv_objects_in_frames",
+            return_value={"enabled": False, "model_path": "", "error": "test", "detections": []},
+        )
+        self.cv_patcher.start()
+
+    def tearDown(self):
+        self.cv_patcher.stop()
+
     def test_classifies_age_mark_and_price_as_substantial(self):
         self.assertEqual(classify_substantial_text("18+"), "age_mark")
         self.assertEqual(classify_substantial_text("1 999 руб."), "price")
@@ -213,6 +224,36 @@ class FrameSafetyTests(unittest.TestCase):
         self.assertEqual(result["status"], "fail")
         self.assertEqual(result["checked_count"], 3)
         self.assertIn("Цена 1 999 руб.", result["message"])
+
+    def test_logo_scope_fails_for_visual_logo_outside_green_frame(self):
+        tmp, base = make_result_dir(make_ocr_log("Новая коллекция", (120, 100, 260, 130)))
+        self.cv_patcher.stop()
+        fake_cv = {
+            "enabled": True,
+            "model_path": "model.pt",
+            "error": "",
+            "detections": [
+                {
+                    "label": "logo",
+                    "raw_label": "logo",
+                    "confidence": 0.91,
+                    "frame": "frame_001.jpg",
+                    "second": "1сек.",
+                    "bbox": [20, 30, 120, 90],
+                }
+            ],
+        }
+        try:
+            with patch("app.frame_safety.detect_cv_objects_in_frames", return_value=fake_cv):
+                result = evaluate_logo_safety(base)
+        finally:
+            tmp.cleanup()
+            self.cv_patcher.start()
+
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["cv_checked_count"], 1)
+        self.assertEqual(result["cv_violation_count"], 1)
+        self.assertIn("CV: logo", result["message"])
 
 
 if __name__ == "__main__":

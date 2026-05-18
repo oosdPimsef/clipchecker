@@ -11,9 +11,33 @@ from typing import Any
 
 from PIL import Image
 
+try:
+    from cv_detection import detect_cv_objects_in_frames
+except ImportError:
+    from .cv_detection import detect_cv_objects_in_frames
+
 
 SAFE_MARGIN_X = 0.10
 SAFE_MARGIN_Y = 0.05
+LOGO_CV_LABELS = [
+    "logo",
+    "brand logo",
+    "company logo",
+    "trademark",
+    "brand mark",
+]
+SUBSTANTIAL_CV_LABELS = LOGO_CV_LABELS + [
+    "product",
+    "package",
+    "packaging",
+    "box",
+    "label",
+    "price tag",
+    "sign",
+    "banner",
+    "poster",
+    "emblem",
+]
 
 
 def load_ocr_log(path: str | Path) -> dict:
@@ -253,10 +277,104 @@ def analyze_frame_safety(ocr_data: dict, frames_dir: str | Path | None, scope: s
     }
 
 
+def _cv_labels_for_scope(scope: str) -> list[str]:
+    if scope == "logos":
+        return LOGO_CV_LABELS
+    if scope == "all_text":
+        return SUBSTANTIAL_CV_LABELS
+    return []
+
+
+def analyze_frame_safety_cv(frames_dir: str | Path | None, scope: str = "all_text") -> dict:
+    labels = _cv_labels_for_scope(scope)
+    if not labels:
+        return {
+            "cv_enabled": False,
+            "cv_model_path": "",
+            "cv_error": "",
+            "cv_checked_count": 0,
+            "cv_violation_count": 0,
+            "cv_violations": [],
+        }
+    if not frames_dir:
+        return {
+            "cv_enabled": False,
+            "cv_model_path": "",
+            "cv_error": "Кадры для CV-проверки рамки не найдены.",
+            "cv_checked_count": 0,
+            "cv_violation_count": 0,
+            "cv_violations": [],
+        }
+
+    cv_result = detect_cv_objects_in_frames(frames_dir, labels=labels)
+    checked = 0
+    violations: list[dict] = []
+    frames_base = Path(frames_dir)
+
+    if cv_result["enabled"]:
+        for item in cv_result["detections"]:
+            bbox_values = item.get("bbox")
+            if not bbox_values or len(bbox_values) < 4:
+                continue
+            size = frame_size(frames_base / item.get("frame", ""))
+            if size is None:
+                continue
+            width, height = size
+            checked += 1
+            bbox = tuple(int(value) for value in bbox_values[:4])
+            box = safe_box(width, height)
+            if not bbox_inside(bbox, box):
+                violations.append(
+                    {
+                        "label": item.get("raw_label") or item.get("label", ""),
+                        "confidence": item.get("confidence"),
+                        "frame": item.get("frame", ""),
+                        "second": item.get("second") or frame_second_label(item.get("frame", "")),
+                        "bbox": bbox,
+                        "safe_box": box,
+                    }
+                )
+
+    grouped: dict[str, dict] = {}
+    frames_with_violations = set()
+    for violation in violations:
+        key = normalized_key(violation["label"])
+        frames_with_violations.add(violation["frame"])
+        if key not in grouped:
+            grouped[key] = {
+                "label": violation["label"],
+                "frames": [],
+                "seconds": [],
+                "confidences": [],
+            }
+        grouped[key]["frames"].append(violation["frame"])
+        grouped[key]["seconds"].append(violation["second"])
+        if violation.get("confidence") is not None:
+            grouped[key]["confidences"].append(violation["confidence"])
+
+    for group in grouped.values():
+        group["frames"] = sorted(set(group["frames"]))
+        group["seconds"] = sorted(
+            set(group["seconds"]),
+            key=lambda value: int(re.search(r"\d+", value).group(0)) if re.search(r"\d+", value) else 0,
+        )
+        group["confidences"] = sorted(set(group["confidences"]), reverse=True)
+
+    return {
+        "cv_enabled": cv_result["enabled"],
+        "cv_model_path": cv_result["model_path"],
+        "cv_error": cv_result["error"],
+        "cv_checked_count": checked,
+        "cv_violation_count": len(violations),
+        "cv_frames_with_violations_count": len(frames_with_violations),
+        "cv_violations": list(grouped.values()),
+    }
+
+
 SCOPE_LABELS = {
     "legal_disclaimer": "текст юридических набивок",
-    "logos": "логотипы рекламодателя, распознанные OCR",
-    "all_text": "все надписи на экране",
+    "logos": "логотипы рекламодателя",
+    "all_text": "все надписи и существенные визуальные элементы на экране",
 }
 
 
@@ -278,17 +396,34 @@ def evaluate_frame_safety(result_dir: str | Path, scope: str = "all_text") -> di
         }
 
     analysis = analyze_frame_safety(load_ocr_log(ocr_path), frames_dir, scope=scope)
-    if analysis["checked_count"] == 0:
+    cv_analysis = analyze_frame_safety_cv(frames_dir, scope=scope)
+    analysis = {**analysis, **cv_analysis}
+    total_checked = analysis["checked_count"] + analysis["cv_checked_count"]
+    total_violations = analysis["violation_count"] + analysis["cv_violation_count"]
+    total_frames_with_violations = len(
+        {
+            frame
+            for violation in analysis["violations"]
+            for frame in violation.get("frames", [])
+        }
+        | {
+            frame
+            for violation in analysis["cv_violations"]
+            for frame in violation.get("frames", [])
+        }
+    )
+
+    if total_checked == 0:
         return {
             "status": "pending",
             "message": f"Элементы группы «{label}» для проверки рамки не найдены.",
             **analysis,
         }
 
-    if analysis["violation_count"] == 0:
+    if total_violations == 0:
         return {
             "status": "pass",
-            "message": f"Группа «{label}»: все элементы в зеленой рамке. Проверено элементов: {analysis['checked_count']}.",
+            "message": f"Группа «{label}»: все элементы в зеленой рамке. Проверено элементов: {total_checked}.",
             **analysis,
         }
 
@@ -296,12 +431,15 @@ def evaluate_frame_safety(result_dir: str | Path, scope: str = "all_text") -> di
     for violation in analysis["violations"][:3]:
         seconds = ", ".join(violation["seconds"][:5])
         preview.append(f"{violation['text']} ({seconds})")
+    for violation in analysis["cv_violations"][:3]:
+        seconds = ", ".join(violation["seconds"][:5])
+        preview.append(f"CV: {violation['label']} ({seconds})")
 
     return {
         "status": "fail",
         "message": (
-            f"Группа «{label}»: за зеленой рамкой найдено {analysis['violation_count']} элементов "
-            f"на {analysis['frames_with_violations_count']} кадрах: {'; '.join(preview)}."
+            f"Группа «{label}»: за зеленой рамкой найдено {total_violations} элементов "
+            f"на {total_frames_with_violations} кадрах: {'; '.join(preview)}."
         ),
         **analysis,
     }

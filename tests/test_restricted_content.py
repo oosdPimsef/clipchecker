@@ -67,6 +67,22 @@ def make_result_dir(ocr_log: dict | None = None):
 
 
 class RestrictedContentTests(unittest.TestCase):
+    def setUp(self):
+        self.cv_patcher = patch(
+            "app.restricted_content.analyze_restricted_content_from_cv",
+            return_value={
+                "cv_enabled": False,
+                "cv_model_path": "",
+                "cv_error": "YOLO test disabled",
+                "cv_detections": [],
+                "cv_restricted_mentions": [],
+            },
+        )
+        self.cv_patcher.start()
+
+    def tearDown(self):
+        self.cv_patcher.stop()
+
     def test_dictionaries_have_practical_size(self):
         for check_id in ("249", "269", "270", "271"):
             self.assertGreaterEqual(len(RESTRICTED_CONTENT_CHECKS[check_id]["terms"]), 35)

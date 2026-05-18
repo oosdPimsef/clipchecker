@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -76,6 +77,16 @@ def save_tricolor(path: Path) -> None:
 
 
 class StateSymbolsTests(unittest.TestCase):
+    def setUp(self):
+        self.cv_patcher = patch(
+            "app.state_symbols.detect_cv_objects_in_frames",
+            return_value={"enabled": False, "model_path": "", "error": "test", "detections": []},
+        )
+        self.cv_patcher.start()
+
+    def tearDown(self):
+        self.cv_patcher.stop()
+
     def test_has_at_least_15_definitions(self):
         self.assertGreaterEqual(len(STATE_SYMBOL_DEFINITIONS), 15)
 
@@ -139,6 +150,34 @@ class StateSymbolsTests(unittest.TestCase):
         self.assertEqual(item["status"], "fail")
         self.assertIn("message_html", item)
         self.assertIn("георгиевская", item["message"].lower())
+
+    def test_evaluate_state_symbols_fails_for_cv_flag(self):
+        tmp, base = make_result_dir(make_ocr_log({"frame_001.jpg": ["Новая коллекция украшений"]}))
+        self.cv_patcher.stop()
+        fake_cv = {
+            "enabled": True,
+            "model_path": "model.pt",
+            "error": "",
+            "detections": [
+                {
+                    "label": "flag",
+                    "raw_label": "flag",
+                    "confidence": 0.88,
+                    "frame": "frame_001.jpg",
+                    "second": "1сек.",
+                }
+            ],
+        }
+        try:
+            with patch("app.state_symbols.detect_cv_objects_in_frames", return_value=fake_cv):
+                result = evaluate_state_symbols(base)
+        finally:
+            tmp.cleanup()
+            self.cv_patcher.start()
+
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("flag", result["message"])
+        self.assertTrue(result["cv_enabled"])
 
 
 if __name__ == "__main__":

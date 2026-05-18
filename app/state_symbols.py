@@ -10,8 +10,10 @@ from pathlib import Path
 from PIL import Image, ImageStat
 
 try:
+    from cv_detection import detect_cv_objects_in_frames
     from frame_safety import find_frames_dir, frame_second_label, iter_ocr_lines, load_ocr_log, normalize_text
 except ImportError:
+    from .cv_detection import detect_cv_objects_in_frames
     from .frame_safety import find_frames_dir, frame_second_label, iter_ocr_lines, load_ocr_log, normalize_text
 
 
@@ -38,6 +40,19 @@ STATE_SYMBOL_DEFINITIONS = [
 ]
 STATE_SYMBOL_CONTEXT_EXCLUSIONS = [
     r"\bфлагман[а-яa-z]*\b",
+]
+STATE_SYMBOL_CV_LABELS = [
+    "flag",
+    "national flag",
+    "coat of arms",
+    "emblem",
+    "government emblem",
+    "cross",
+    "religious cross",
+    "crescent",
+    "star of david",
+    "icon",
+    "religious icon",
 ]
 
 
@@ -134,6 +149,39 @@ def _add_grouped(grouped: dict[str, dict], definition: str, term: str, frame: st
         grouped[key]["examples"].append(example)
 
 
+def analyze_state_symbols_from_cv(frames_dir: str | Path | None) -> dict:
+    if not frames_dir:
+        return {
+            "cv_enabled": False,
+            "cv_model_path": "",
+            "cv_error": "Кадры для CV-проверки государственных символов не найдены.",
+            "cv_state_symbols": [],
+        }
+
+    cv_result = detect_cv_objects_in_frames(frames_dir, labels=STATE_SYMBOL_CV_LABELS)
+    grouped: dict[str, dict] = {}
+    if cv_result["enabled"]:
+        for item in cv_result["detections"]:
+            label = item.get("raw_label") or item.get("label", "")
+            confidence = item.get("confidence")
+            example = f"CV confidence {confidence}" if confidence is not None else "CV"
+            _add_grouped(grouped, "визуальный CV", str(label), item.get("frame", ""), example)
+
+    for item in grouped.values():
+        item["seconds"] = sorted(
+            set(item["seconds"]),
+            key=lambda value: int(re.search(r"\d+", value).group(0)) if re.search(r"\d+", value) else 0,
+        )
+        item["frames"] = sorted(set(item["frames"]))
+
+    return {
+        "cv_enabled": cv_result["enabled"],
+        "cv_model_path": cv_result["model_path"],
+        "cv_error": cv_result["error"],
+        "cv_state_symbols": list(grouped.values()),
+    }
+
+
 def analyze_state_symbols(ocr_data: dict | None, frames_dir: str | Path | None) -> dict:
     grouped: dict[str, dict] = {}
     total = 0
@@ -156,6 +204,13 @@ def analyze_state_symbols(ocr_data: dict | None, frames_dir: str | Path | None) 
                 total += 1
                 _add_grouped(grouped, "триколор", "визуальный триколор", frame_path.name, "визуальная эвристика")
 
+    cv_analysis = analyze_state_symbols_from_cv(frames_base)
+    for item in cv_analysis["cv_state_symbols"]:
+        example = (item.get("examples") or ["CV"])[0]
+        for frame in item.get("frames", []):
+            total += 1
+            _add_grouped(grouped, item["definition"], item["term"], frame, example)
+
     for item in grouped.values():
         item["seconds"] = sorted(
             set(item["seconds"]),
@@ -167,6 +222,7 @@ def analyze_state_symbols(ocr_data: dict | None, frames_dir: str | Path | None) 
         "state_symbol_count": total,
         "state_symbols": list(grouped.values()),
         "dictionary_size": len(STATE_SYMBOL_DEFINITIONS),
+        **cv_analysis,
     }
 
 
