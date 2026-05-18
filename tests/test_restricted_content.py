@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -126,6 +127,53 @@ class RestrictedContentTests(unittest.TestCase):
             tmp.cleanup()
 
         self.assertEqual(result["status"], "pass")
+        self.assertIn("cv_enabled", result)
+
+    def test_cv_detection_fails_even_without_ocr_terms(self):
+        tmp, base = make_result_dir(make_ocr_log({"frame_001.jpg": ["Коллекция украшений"]}))
+        fake_cv = {
+            "cv_enabled": True,
+            "cv_model_path": "model.pt",
+            "cv_error": "",
+            "cv_detections": [
+                {
+                    "label": "bottle",
+                    "raw_label": "bottle",
+                    "confidence": 0.91,
+                    "frame": "frame_001.jpg",
+                    "second": "1сек.",
+                }
+            ],
+            "cv_restricted_mentions": [
+                {
+                    "label": "bottle",
+                    "raw_label": "bottle",
+                    "confidence": 0.91,
+                    "frame": "frame_001.jpg",
+                    "second": "1сек.",
+                }
+            ],
+        }
+        try:
+            with patch("app.restricted_content.analyze_restricted_content_from_cv", return_value=fake_cv):
+                result = evaluate_alcohol_references(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("CV", result["message"])
+        self.assertIn("bottle", result["message"])
+
+    def test_cv_model_absence_is_reported_in_details(self):
+        tmp, base = make_result_dir(make_ocr_log({"frame_001.jpg": ["Коллекция украшений"]}))
+        try:
+            result = evaluate_alcohol_references(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertFalse(result["cv_enabled"])
+        self.assertIn("YOLO", result["cv_error"])
 
     def test_evaluates_item_ids_inside_view_model(self):
         tmp, base = make_result_dir(

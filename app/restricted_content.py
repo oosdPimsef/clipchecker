@@ -4,13 +4,17 @@
 from __future__ import annotations
 
 import html
+import os
 import re
+import tempfile
 from pathlib import Path
 
 try:
+    from black_bars import find_source_frames_dir, list_frame_files
     from frame_safety import frame_second_label, iter_ocr_lines, load_ocr_log, normalize_text
     from price_checks import read_text_file
 except ImportError:
+    from .black_bars import find_source_frames_dir, list_frame_files
     from .frame_safety import frame_second_label, iter_ocr_lines, load_ocr_log, normalize_text
     from .price_checks import read_text_file
 
@@ -243,6 +247,60 @@ RESTRICTED_CONTENT_CHECKS = {
         ],
     },
 }
+RESTRICTED_CV_LABELS = {
+    "249": {
+        "bottle",
+        "wine glass",
+        "beer bottle",
+        "wine bottle",
+        "liquor bottle",
+        "can",
+        "beer can",
+        "cup",
+        "glass",
+        "cocktail glass",
+    },
+    "269": {
+        "cigarette",
+        "cigar",
+        "tobacco",
+        "smoking",
+        "smoke",
+        "hookah",
+        "shisha",
+        "vape",
+        "e-cigarette",
+        "lighter",
+        "ashtray",
+    },
+    "270": {
+        "drug",
+        "drugs",
+        "pill",
+        "pills",
+        "tablet",
+        "powder",
+        "syringe",
+        "needle",
+        "cannabis",
+        "marijuana",
+    },
+    "271": {
+        "knife",
+        "gun",
+        "pistol",
+        "rifle",
+        "weapon",
+        "bullet",
+        "ammunition",
+        "grenade",
+        "bomb",
+        "sword",
+        "machete",
+    },
+}
+_YOLO_MODEL_CACHE = {"path": None, "model": None, "error": None}
+_YOLO_DETECTIONS_CACHE: dict[tuple[str, str], dict] = {}
 
 
 def _term_pattern(term: str) -> re.Pattern:
@@ -322,12 +380,171 @@ def analyze_restricted_content_from_text(text: str, check_id: str) -> dict:
     }
 
 
+def configured_cv_model_path() -> Path | None:
+    value = (
+        os.getenv("RESTRICTED_CONTENT_YOLO_MODEL")
+        or os.getenv("CLIPCHECKER_YOLO_MODEL")
+        or ""
+    ).strip().strip('"')
+    if not value:
+        return None
+    path = Path(value)
+    return path if path.is_file() else None
+
+
+def _load_yolo_model(model_path: Path):
+    cached_path = _YOLO_MODEL_CACHE.get("path")
+    if cached_path == str(model_path):
+        return _YOLO_MODEL_CACHE.get("model"), _YOLO_MODEL_CACHE.get("error")
+
+    try:
+        os.environ.setdefault("YOLO_CONFIG_DIR", str(Path(tempfile.gettempdir()) / "clipchecker_ultralytics"))
+        from ultralytics import YOLO
+
+        model = YOLO(str(model_path))
+        _YOLO_MODEL_CACHE.update({"path": str(model_path), "model": model, "error": None})
+        return model, None
+    except Exception as exc:
+        error = f"{exc.__class__.__name__}: {exc}"
+        _YOLO_MODEL_CACHE.update({"path": str(model_path), "model": None, "error": error})
+        return None, error
+
+
+def _normalize_label(label: str) -> str:
+    return normalize_text(label).lower().replace("_", " ").replace("-", " ")
+
+
+def _extract_yolo_result_detections(result, frame_name: str, confidence_threshold: float) -> list[dict]:
+    names = getattr(result, "names", {}) or {}
+    boxes = getattr(result, "boxes", None)
+    if boxes is None:
+        return []
+
+    detections = []
+    for box in boxes:
+        try:
+            cls_id = int(box.cls[0].item())
+            confidence = float(box.conf[0].item())
+        except Exception:
+            continue
+        if confidence < confidence_threshold:
+            continue
+
+        label = str(names.get(cls_id, cls_id))
+        detections.append(
+            {
+                "label": _normalize_label(label),
+                "raw_label": label,
+                "confidence": round(confidence, 3),
+                "frame": frame_name,
+                "second": frame_second_label(frame_name),
+            }
+        )
+    return detections
+
+
+def detect_cv_objects_in_frames(
+    frames_dir: str | Path,
+    *,
+    model_path: str | Path | None = None,
+    confidence_threshold: float = 0.35,
+) -> dict:
+    model_file = Path(model_path) if model_path else configured_cv_model_path()
+    if model_file is None:
+        return {
+            "enabled": False,
+            "model_path": "",
+            "error": "Локальная YOLO-модель не задана. Укажите путь в CLIPCHECKER_YOLO_MODEL или RESTRICTED_CONTENT_YOLO_MODEL.",
+            "detections": [],
+        }
+
+    cache_key = (str(Path(frames_dir).resolve()), str(model_file.resolve()))
+    if cache_key in _YOLO_DETECTIONS_CACHE:
+        return _YOLO_DETECTIONS_CACHE[cache_key]
+
+    model, error = _load_yolo_model(model_file)
+    if model is None:
+        return {
+            "enabled": False,
+            "model_path": str(model_file),
+            "error": error or "YOLO-модель не загрузилась.",
+            "detections": [],
+        }
+
+    detections = []
+    frames = list_frame_files(frames_dir)
+    for frame in frames:
+        try:
+            results = model.predict(str(frame), verbose=False, conf=confidence_threshold)
+        except Exception as exc:
+            return {
+                "enabled": False,
+                "model_path": str(model_file),
+                "error": f"{exc.__class__.__name__}: {exc}",
+                "detections": detections,
+            }
+        for result in results:
+            detections.extend(_extract_yolo_result_detections(result, frame.name, confidence_threshold))
+
+    output = {
+        "enabled": True,
+        "model_path": str(model_file),
+        "error": "",
+        "detections": detections,
+    }
+    _YOLO_DETECTIONS_CACHE[cache_key] = output
+    return output
+
+
+def filter_cv_detections(detections: list[dict], check_id: str) -> list[dict]:
+    target_labels = RESTRICTED_CV_LABELS[check_id]
+    filtered = []
+    for item in detections:
+        label = _normalize_label(item.get("label", ""))
+        if label in target_labels:
+            filtered.append(item)
+    return filtered
+
+
+def analyze_restricted_content_from_cv(result_dir: str | Path, check_id: str) -> dict:
+    frames_dir = find_source_frames_dir(result_dir)
+    if frames_dir is None:
+        return {
+            "cv_enabled": False,
+            "cv_model_path": "",
+            "cv_error": "Кадры для CV-проверки не найдены.",
+            "cv_detections": [],
+            "cv_restricted_mentions": [],
+        }
+
+    cv_result = detect_cv_objects_in_frames(frames_dir)
+    filtered = filter_cv_detections(cv_result["detections"], check_id)
+    return {
+        "cv_enabled": cv_result["enabled"],
+        "cv_model_path": cv_result["model_path"],
+        "cv_error": cv_result["error"],
+        "cv_detections": cv_result["detections"],
+        "cv_restricted_mentions": filtered,
+    }
+
+
 def _format_mentions_html(mentions: list[dict]) -> str:
     parts = []
     for item in mentions:
         seconds = ", ".join(item.get("seconds", [])[:8])
         suffix = f" ({html.escape(seconds)})" if seconds else ""
         parts.append(f'<strong style="color:#dc2626;font-weight:800">{html.escape(item["term"])}</strong>{suffix}')
+    return "; ".join(parts)
+
+
+def _format_cv_mentions_html(mentions: list[dict]) -> str:
+    parts = []
+    for item in mentions:
+        label = item.get("raw_label") or item.get("label", "")
+        second = item.get("second", "")
+        confidence = item.get("confidence")
+        suffix = f" ({html.escape(second)}; {confidence})" if second else ""
+        parts.append(f'<strong style="color:#dc2626;font-weight:800">{html.escape(str(label))}</strong>{suffix}')
     return "; ".join(parts)
 
 
@@ -341,10 +558,13 @@ def evaluate_restricted_content(result_dir: str | Path, check_id: str) -> dict:
         analysis = analyze_restricted_content_from_ocr(load_ocr_log(ocr_path), check_id)
     else:
         analysis = analyze_restricted_content_from_text(read_text_file(all_text_path), check_id)
+    cv_analysis = analyze_restricted_content_from_cv(base, check_id)
+    analysis = {**analysis, **cv_analysis}
 
     config = RESTRICTED_CONTENT_CHECKS[check_id]
     mentions = analysis["restricted_mentions"]
-    if not mentions:
+    cv_mentions = analysis["cv_restricted_mentions"]
+    if not mentions and not cv_mentions:
         if not has_materials:
             return {
                 "status": "pending",
@@ -361,8 +581,21 @@ def evaluate_restricted_content(result_dir: str | Path, check_id: str) -> dict:
         f"{item['term']} ({', '.join(item.get('seconds', [])[:8])})" if item.get("seconds") else item["term"]
         for item in mentions
     )
-    message = f"{config['found_message']}: {plain}."
-    message_html = f"{html.escape(config['found_message'])}: {_format_mentions_html(mentions)}."
+    cv_plain = "; ".join(
+        f"{item.get('raw_label') or item.get('label')} ({item.get('second')}; {item.get('confidence')})"
+        for item in cv_mentions
+    )
+    parts = []
+    html_parts = []
+    if plain:
+        parts.append(f"текст: {plain}")
+        html_parts.append(f"текст: {_format_mentions_html(mentions)}")
+    if cv_plain:
+        parts.append(f"CV: {cv_plain}")
+        html_parts.append(f"CV: {_format_cv_mentions_html(cv_mentions)}")
+
+    message = f"{config['found_message']}: {'; '.join(parts)}."
+    message_html = f"{html.escape(config['found_message'])}: {'; '.join(html_parts)}."
     return {
         "status": "fail",
         "message": message,
