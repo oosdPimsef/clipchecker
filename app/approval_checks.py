@@ -15,6 +15,7 @@ try:
     from jewelry_check import evaluate_jewelry_presence, evaluate_jewelry_tags_required
     from media_person_check import evaluate_actor_recognition
     from price_checks import evaluate_document_prices_match_video, evaluate_ruble_prices
+    from state_symbols import evaluate_state_symbols
 except ImportError:
     from .black_bars import evaluate_black_side_bars
     from .comparative_claims import evaluate_comparative_claims
@@ -24,6 +25,7 @@ except ImportError:
     from .jewelry_check import evaluate_jewelry_presence, evaluate_jewelry_tags_required
     from .media_person_check import evaluate_actor_recognition
     from .price_checks import evaluate_document_prices_match_video, evaluate_ruble_prices
+    from .state_symbols import evaluate_state_symbols
 
 
 def _count_frame_seconds(result_dir: str | Path) -> int | None:
@@ -198,6 +200,7 @@ EVALUATORS = {
     "13": evaluate_jewelry_tags_required,
     "14": evaluate_actor_recognition,
     "16": evaluate_comparative_claims,
+    "251": evaluate_state_symbols,
 }
 
 
