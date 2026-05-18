@@ -9,6 +9,7 @@ from pathlib import Path
 try:
     from black_bars import evaluate_black_side_bars
     from comparative_claims import evaluate_claim_support, evaluate_comparative_claims
+    from distance_sales import evaluate_distance_sales_disclaimer
     from frame_quality import evaluate_blank_frames, evaluate_repeated_frames
     from frame_safety import evaluate_all_text_safety, evaluate_legal_disclaimer_safety, evaluate_logo_safety
     from foreign_words import evaluate_foreign_words, evaluate_foreign_words_translation_or_trademark
@@ -26,6 +27,7 @@ try:
 except ImportError:
     from .black_bars import evaluate_black_side_bars
     from .comparative_claims import evaluate_claim_support, evaluate_comparative_claims
+    from .distance_sales import evaluate_distance_sales_disclaimer
     from .frame_quality import evaluate_blank_frames, evaluate_repeated_frames
     from .frame_safety import evaluate_all_text_safety, evaluate_legal_disclaimer_safety, evaluate_logo_safety
     from .foreign_words import evaluate_foreign_words, evaluate_foreign_words_translation_or_trademark
@@ -215,6 +217,7 @@ EVALUATORS = {
     "14": evaluate_actor_recognition,
     "16": evaluate_comparative_claims,
     "235": evaluate_claim_support,
+    "246": evaluate_distance_sales_disclaimer,
     "249": evaluate_alcohol_references,
     "228": evaluate_repeated_frames,
     "229": evaluate_blank_frames,
