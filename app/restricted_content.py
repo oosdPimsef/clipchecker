@@ -303,6 +303,19 @@ _YOLO_MODEL_CACHE = {"path": None, "model": None, "error": None}
 _YOLO_DETECTIONS_CACHE: dict[tuple[str, str], dict] = {}
 
 
+def _all_cv_labels() -> list[str]:
+    labels = []
+    seen = set()
+    for group in RESTRICTED_CV_LABELS.values():
+        for label in group:
+            normalized = _normalize_label(label)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            labels.append(label)
+    return labels
+
+
 def _term_pattern(term: str) -> re.Pattern:
     escaped = re.escape(term.lower().replace("ё", "е"))
     escaped = escaped.replace(r"\ ", r"\s+")
@@ -398,10 +411,21 @@ def _load_yolo_model(model_path: Path):
         return _YOLO_MODEL_CACHE.get("model"), _YOLO_MODEL_CACHE.get("error")
 
     try:
-        os.environ.setdefault("YOLO_CONFIG_DIR", str(Path(tempfile.gettempdir()) / "clipchecker_ultralytics"))
-        from ultralytics import YOLO
+        cache_root = Path(os.getenv("CLIPCHECKER_CV_CACHE") or (model_path.parent / "cv_cache"))
+        cache_root.mkdir(parents=True, exist_ok=True)
+        os.environ.setdefault("YOLO_CONFIG_DIR", str(cache_root / "ultralytics"))
+        os.environ.setdefault("XDG_CACHE_HOME", str(cache_root))
+        os.environ.setdefault("TORCH_HOME", str(cache_root / "torch"))
+        # The CLIP package uses expanduser("~/.cache/clip") and the default user
+        # profile can be locked by corporate policy. Keep this override process-local.
+        os.environ["HOME"] = str(cache_root)
+        os.environ["USERPROFILE"] = str(cache_root)
+        from ultralytics import YOLO, YOLOWorld
 
-        model = YOLO(str(model_path))
+        model_class = YOLOWorld if "world" in model_path.name.lower() else YOLO
+        model = model_class(str(model_path))
+        if hasattr(model, "set_classes"):
+            model.set_classes(_all_cv_labels())
         _YOLO_MODEL_CACHE.update({"path": str(model_path), "model": model, "error": None})
         return model, None
     except Exception as exc:
@@ -447,8 +471,14 @@ def detect_cv_objects_in_frames(
     frames_dir: str | Path,
     *,
     model_path: str | Path | None = None,
-    confidence_threshold: float = 0.35,
+    confidence_threshold: float | None = None,
 ) -> dict:
+    if confidence_threshold is None:
+        try:
+            confidence_threshold = float(os.getenv("RESTRICTED_CONTENT_CV_CONFIDENCE", "0.55"))
+        except ValueError:
+            confidence_threshold = 0.55
+
     model_file = Path(model_path) if model_path else configured_cv_model_path()
     if model_file is None:
         return {
@@ -497,7 +527,7 @@ def detect_cv_objects_in_frames(
 
 
 def filter_cv_detections(detections: list[dict], check_id: str) -> list[dict]:
-    target_labels = RESTRICTED_CV_LABELS[check_id]
+    target_labels = {_normalize_label(label) for label in RESTRICTED_CV_LABELS[check_id]}
     filtered = []
     for item in detections:
         label = _normalize_label(item.get("label", ""))

@@ -26,6 +26,8 @@ app/ключи.docx
 *.log
 app/logs/
 app/Clipchecker_materials/
+app/models/cv_cache/
+app/models/yolo_config/
 **/Clipchecker_materials/
 **/frames/
 **/frames_pdf_original/

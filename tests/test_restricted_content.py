@@ -167,7 +167,8 @@ class RestrictedContentTests(unittest.TestCase):
     def test_cv_model_absence_is_reported_in_details(self):
         tmp, base = make_result_dir(make_ocr_log({"frame_001.jpg": ["Коллекция украшений"]}))
         try:
-            result = evaluate_alcohol_references(base)
+            with patch.dict("os.environ", {"CLIPCHECKER_YOLO_MODEL": "", "RESTRICTED_CONTENT_YOLO_MODEL": ""}):
+                result = evaluate_alcohol_references(base)
         finally:
             tmp.cleanup()
 
