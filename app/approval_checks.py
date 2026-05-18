@@ -16,6 +16,12 @@ try:
     from jewelry_check import evaluate_jewelry_presence, evaluate_jewelry_tags_required
     from media_person_check import evaluate_actor_recognition
     from price_checks import evaluate_document_prices_match_video, evaluate_ruble_prices
+    from restricted_content import (
+        evaluate_alcohol_references,
+        evaluate_drug_references,
+        evaluate_smoking_references,
+        evaluate_weapon_violence_references,
+    )
     from state_symbols import evaluate_state_symbols
 except ImportError:
     from .black_bars import evaluate_black_side_bars
@@ -27,6 +33,12 @@ except ImportError:
     from .jewelry_check import evaluate_jewelry_presence, evaluate_jewelry_tags_required
     from .media_person_check import evaluate_actor_recognition
     from .price_checks import evaluate_document_prices_match_video, evaluate_ruble_prices
+    from .restricted_content import (
+        evaluate_alcohol_references,
+        evaluate_drug_references,
+        evaluate_smoking_references,
+        evaluate_weapon_violence_references,
+    )
     from .state_symbols import evaluate_state_symbols
 
 
@@ -203,9 +215,13 @@ EVALUATORS = {
     "14": evaluate_actor_recognition,
     "16": evaluate_comparative_claims,
     "235": evaluate_claim_support,
+    "249": evaluate_alcohol_references,
     "228": evaluate_repeated_frames,
     "229": evaluate_blank_frames,
     "262": evaluate_foreign_words_translation_or_trademark,
+    "269": evaluate_smoking_references,
+    "270": evaluate_drug_references,
+    "271": evaluate_weapon_violence_references,
     "251": evaluate_state_symbols,
 }
 
