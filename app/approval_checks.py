@@ -17,6 +17,7 @@ try:
     from grammar_checks import evaluate_legal_disclaimer_grammar, evaluate_non_legal_grammar
     from jewelry_check import evaluate_jewelry_presence, evaluate_jewelry_tags_required
     from media_person_check import evaluate_actor_recognition
+    from non_russian_words import evaluate_non_russian_words, evaluate_non_russian_words_translation
     from price_checks import evaluate_document_prices_match_video, evaluate_ruble_prices
     from restricted_content import (
         evaluate_alcohol_references,
@@ -36,6 +37,7 @@ except ImportError:
     from .grammar_checks import evaluate_legal_disclaimer_grammar, evaluate_non_legal_grammar
     from .jewelry_check import evaluate_jewelry_presence, evaluate_jewelry_tags_required
     from .media_person_check import evaluate_actor_recognition
+    from .non_russian_words import evaluate_non_russian_words, evaluate_non_russian_words_translation
     from .price_checks import evaluate_document_prices_match_video, evaluate_ruble_prices
     from .restricted_content import (
         evaluate_alcohol_references,
@@ -222,6 +224,8 @@ EVALUATORS = {
     "246": evaluate_distance_sales_disclaimer,
     "247": evaluate_contact_info_disclaimer,
     "249": evaluate_alcohol_references,
+    "252": evaluate_non_russian_words,
+    "258": evaluate_non_russian_words_translation,
     "228": evaluate_repeated_frames,
     "229": evaluate_blank_frames,
     "262": evaluate_foreign_words_translation_or_trademark,
