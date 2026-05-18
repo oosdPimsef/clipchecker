@@ -36,6 +36,9 @@ STATE_SYMBOL_DEFINITIONS = [
     ("звезда давида", ["звезда давида", "иудейская звезда"]),
     ("икона", ["икона", "лик святого", "святой образ"]),
 ]
+STATE_SYMBOL_CONTEXT_EXCLUSIONS = [
+    r"\bфлагман[а-яa-z]*\b",
+]
 
 
 def _variant_pattern(variant: str) -> re.Pattern:
@@ -53,6 +56,8 @@ STATE_SYMBOL_PATTERNS = [
 
 def extract_state_symbol_terms(text: str) -> list[dict]:
     normalized = normalize_text(text or "").lower().replace("ё", "е")
+    for exclusion in STATE_SYMBOL_CONTEXT_EXCLUSIONS:
+        normalized = re.sub(exclusion, " ", normalized, flags=re.IGNORECASE)
     found = []
     seen = set()
     for definition, variant, pattern in STATE_SYMBOL_PATTERNS:

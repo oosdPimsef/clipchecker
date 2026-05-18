@@ -86,6 +86,10 @@ class StateSymbolsTests(unittest.TestCase):
         self.assertIn("герб города", definitions)
         self.assertIn("двуглавый орел", definitions)
 
+    def test_extract_state_symbol_terms_ignores_flagship_stores(self):
+        terms = extract_state_symbol_terms("во флагманских магазинах SOKOLOV")
+        self.assertEqual(terms, [])
+
     def test_detect_tricolor_frame(self):
         tmp = tempfile.TemporaryDirectory()
         path = Path(tmp.name) / "flag.jpg"
