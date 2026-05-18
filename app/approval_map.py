@@ -15,14 +15,8 @@ APPROVAL_MAP_PATH = Path(
     r"C:\Users\PTambulatov\Desktop\PT\2.Расчеты\50. ХАКАТОН\14. карта согласования рм\1. Карта согласования РМ.xlsx"
 )
 APPROVAL_SHEET_NAME = "РМ"
-REQUIRED_BLOCK_ORDER = [
-    "Видеоряд",
-    "Набивка",
-    "Документы",
-    "Озвучка",
-    "Требования НРА",
-    "Требования ЗоР",
-]
+APPROVAL_DATA_START_ROW = 3
+APPROVAL_ID_COLUMN = 4
 
 
 @dataclass(frozen=True)
@@ -88,10 +82,15 @@ def load_approval_checklist(category: str, path: Path | str = APPROVAL_MAP_PATH)
             raise ValueError(f"Категория '{category}' не найдена в карте согласования")
 
         selected_col = category_map[category]
-        blocks: OrderedDict[str, list[ApprovalItem]] = OrderedDict((block, []) for block in REQUIRED_BLOCK_ORDER)
+        blocks: OrderedDict[str, list[ApprovalItem]] = OrderedDict()
+        first_data_row = max(APPROVAL_DATA_START_ROW, header_row + 1)
 
-        for row_idx in range(header_row + 1, ws.max_row + 1):
+        for row_idx in range(first_data_row, ws.max_row + 1):
             if not _is_selected(ws.cell(row_idx, selected_col).value):
+                continue
+
+            item_id = _norm(ws.cell(row_idx, APPROVAL_ID_COLUMN).value)
+            if not item_id:
                 continue
 
             block = _norm(ws.cell(row_idx, columns["block"]).value)
@@ -99,13 +98,12 @@ def load_approval_checklist(category: str, path: Path | str = APPROVAL_MAP_PATH)
             if not block or not text:
                 continue
 
-            item_id = _norm(ws.cell(row_idx, columns["id"]).value) if columns["id"] else ""
             number = _norm(ws.cell(row_idx, columns["number"]).value) if columns["number"] else ""
             if block not in blocks:
                 blocks[block] = []
             blocks[block].append(ApprovalItem(id=item_id, block=block, number=number, text=text))
 
-        return OrderedDict((block, items) for block, items in blocks.items() if items)
+        return blocks
     finally:
         wb.close()
 

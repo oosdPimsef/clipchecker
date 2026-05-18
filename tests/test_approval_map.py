@@ -27,6 +27,25 @@ def make_workbook():
     return path
 
 
+def make_order_workbook():
+    fd, path = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "РМ"
+    ws.append(["", "", "", "", "Категория"])
+    ws.append(["", "Блок проверки", "номер", "id", "Проверка", "Категория A"])
+    ws.append(["", "Документы", 1, "D-001", "первый документ", 1])
+    ws.append(["", "Видеоряд", 2, "", "строка без id не должна попадать в вывод", 1])
+    ws.append(["", "Видеоряд", 3, "V-003", "третья проверка видео", 1])
+    ws.append(["", "Документы", 4, "D-004", "четвертая проверка документов", 1])
+    ws.append(["", "Набивка", 5, "N-005", "пятая проверка набивки", 1])
+    wb.save(path)
+    wb.close()
+    return path
+
+
 class ApprovalMapTests(unittest.TestCase):
     def test_load_categories_from_header(self):
         path = make_workbook()
@@ -54,6 +73,21 @@ class ApprovalMapTests(unittest.TestCase):
             self.assertEqual(model["selected_category"], "Ритейл")
             self.assertEqual([block["name"] for block in model["blocks"]], ["Видеоряд", "Документы"])
             self.assertEqual(model["blocks"][0]["items"][0]["id"], "V-001")
+        finally:
+            os.remove(path)
+
+    def test_keeps_excel_row_order_by_column_d_id_and_ignores_blank_ids(self):
+        path = make_order_workbook()
+        try:
+            checklist = load_approval_checklist("Категория A", path)
+            self.assertEqual(list(checklist.keys()), ["Документы", "Видеоряд", "Набивка"])
+            self.assertEqual([item.id for item in checklist["Документы"]], ["D-001", "D-004"])
+            self.assertEqual([item.id for item in checklist["Видеоряд"]], ["V-003"])
+
+            model = build_approval_view_model("Категория A", path)
+            self.assertEqual([block["name"] for block in model["blocks"]], ["Документы", "Видеоряд", "Набивка"])
+            self.assertEqual(model["blocks"][0]["items"][0]["id"], "D-001")
+            self.assertEqual(model["blocks"][1]["items"][0]["id"], "V-003")
         finally:
             os.remove(path)
 
