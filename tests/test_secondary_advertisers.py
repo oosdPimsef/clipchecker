@@ -13,9 +13,11 @@ from app.approval_checks import evaluate_approval_view_model
 from app.secondary_advertisers import (
     BRAND_BEARING_CV_LABELS,
     evaluate_asian_brands,
+    evaluate_secondary_advertiser_stoplist,
     evaluate_secondary_advertisers,
     load_asian_brand_database,
     load_secondary_brand_database,
+    load_stoplist_brand_database,
 )
 
 
@@ -52,7 +54,12 @@ def make_ocr_log(frame_lines: dict[str, list[str]]) -> dict:
     return data
 
 
-def make_brand_database(path: Path, brands: list[str], asia_brands: list[str] | None = None) -> None:
+def make_brand_database(
+    path: Path,
+    brands: list[str],
+    asia_brands: list[str] | None = None,
+    stoplist_brands: list[str] | None = None,
+) -> None:
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.title = "Brands"
@@ -62,6 +69,10 @@ def make_brand_database(path: Path, brands: list[str], asia_brands: list[str] | 
         asia = workbook.create_sheet("Asia")
         for row, brand in enumerate(asia_brands, start=1):
             asia.cell(row=row, column=1, value=brand)
+    if stoplist_brands is not None:
+        stoplist = workbook.create_sheet("Stoplist")
+        for row, brand in enumerate(stoplist_brands, start=1):
+            stoplist.cell(row=row, column=1, value=brand)
     workbook.save(path)
 
 
@@ -88,6 +99,7 @@ class SecondaryAdvertisersTests(unittest.TestCase):
             self.brand_path,
             ["Основной бренд", "PepsiCo", "X5 RETAIL GROUP", "АВТОВАЗ (LADA)"],
             ["XIAOMI", "Дахуа", "70mai"],
+            ["PepsiCo", "Apple"],
         )
         self.brand_patch = patch("app.secondary_advertisers.BRAND_DATABASE_PATH", self.brand_path)
         self.cv_patch = patch(
@@ -136,6 +148,18 @@ class SecondaryAdvertisersTests(unittest.TestCase):
         workbook.save(no_asia_path)
 
         self.assertEqual(load_asian_brand_database(no_asia_path), [])
+
+    def test_stoplist_brand_database_is_read_strictly_from_stoplist_sheet(self):
+        records = load_stoplist_brand_database(self.brand_path)
+        self.assertEqual([record.name for record in records], ["PepsiCo", "Apple"])
+
+        workbook = Workbook()
+        workbook.active.title = "Brands"
+        workbook.active["A1"] = "PepsiCo"
+        no_stoplist_path = Path(self.tmp.name) / "no_stoplist.xlsx"
+        workbook.save(no_stoplist_path)
+
+        self.assertEqual(load_stoplist_brand_database(no_stoplist_path), [])
 
     def test_passes_when_only_primary_advertiser_is_found(self):
         tmp, base = make_result_dir(
@@ -237,6 +261,64 @@ class SecondaryAdvertisersTests(unittest.TestCase):
         item = evaluated["blocks"][0]["items"][0]
         self.assertEqual(item["status"], "fail")
         self.assertIn("X5 RETAIL GROUP", item["message"])
+
+    def test_secondary_advertiser_stoplist_fails_for_stoplisted_secondary(self):
+        tmp, base = make_result_dir(
+            make_ocr_log({"frame_001.jpg": ["Основной бренд"], "frame_002.jpg": ["PepsiCo"]}),
+            documents_text="Основной бренд",
+        )
+        try:
+            result = evaluate_secondary_advertiser_stoplist(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["stoplist_matches"][0]["brand"], "PepsiCo")
+        self.assertIn('style="color:#dc2626;font-weight:800"', result["message_html"])
+
+    def test_secondary_advertiser_stoplist_passes_for_non_stoplisted_secondary(self):
+        tmp, base = make_result_dir(
+            make_ocr_log({"frame_001.jpg": ["Основной бренд"], "frame_002.jpg": ["X5 RETAIL GROUP"]}),
+            documents_text="Основной бренд",
+        )
+        try:
+            result = evaluate_secondary_advertiser_stoplist(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertIn("X5 RETAIL GROUP", result["message"])
+
+    def test_secondary_advertiser_stoplist_passes_when_no_secondary_advertiser(self):
+        tmp, base = make_result_dir(
+            make_ocr_log({"frame_001.jpg": ["Основной бренд"]}),
+            documents_text="Основной бренд",
+        )
+        try:
+            result = evaluate_secondary_advertiser_stoplist(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertIn("не применим", result["message"])
+
+    def test_evaluates_item_id_223_inside_view_model(self):
+        tmp, base = make_result_dir(
+            make_ocr_log({"frame_001.jpg": ["Основной бренд"], "frame_002.jpg": ["PepsiCo"]}),
+            documents_text="Основной бренд",
+        )
+        view_model = {
+            "ok": True,
+            "blocks": [{"name": "Видеоряд", "items": [{"id": "223", "number": "223", "text": "stoplist"}]}],
+        }
+        try:
+            evaluated = evaluate_approval_view_model(view_model, base)
+        finally:
+            tmp.cleanup()
+
+        item = evaluated["blocks"][0]["items"][0]
+        self.assertEqual(item["status"], "fail")
+        self.assertIn("PepsiCo", item["message"])
 
     def test_asian_brands_warns_and_formats_brand_names(self):
         tmp, base = make_result_dir(make_ocr_log({"frame_001.jpg": ["XIAOMI"], "frame_002.jpg": ["Дахуа"]}))

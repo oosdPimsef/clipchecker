@@ -29,6 +29,7 @@ BRAND_DATABASE_DIR = BRAND_DATABASE_PATH.parent
 BRAND_DATABASE_FILENAME = BRAND_DATABASE_PATH.name
 SECONDARY_BRANDS_SHEET = "Brands"
 ASIAN_BRANDS_SHEET = "Asia"
+STOPLIST_BRANDS_SHEET = "Stoplist"
 
 BRAND_BEARING_CV_LABELS = [
     "brand logo",
@@ -129,6 +130,10 @@ def load_secondary_brand_database(path: str | Path | None = None) -> list[BrandR
 
 def load_asian_brand_database(path: str | Path | None = None) -> list[BrandRecord]:
     return load_brand_database_sheet(path, ASIAN_BRANDS_SHEET)
+
+
+def load_stoplist_brand_database(path: str | Path | None = None) -> list[BrandRecord]:
+    return load_brand_database_sheet(path, STOPLIST_BRANDS_SHEET)
 
 
 def _compile_brand_patterns(records: list[BrandRecord]) -> list[tuple[BrandRecord, str, re.Pattern]]:
@@ -327,6 +332,36 @@ def _format_secondary_html(mentions: list[dict]) -> str:
     return "; ".join(parts)
 
 
+def _brand_item_keys(item: dict) -> set[str]:
+    values = [item.get("brand", "")]
+    values.extend(item.get("variants", []))
+    values.extend(item.get("cv_labels", []))
+    return {key for value in values if (key := _variant_key(value))}
+
+
+def _stoplist_key_to_brand(records: list[BrandRecord]) -> dict[str, str]:
+    key_to_brand = {}
+    for record in records:
+        for value in (record.name, *record.variants):
+            key = _variant_key(value)
+            if key:
+                key_to_brand[key] = record.name
+    return key_to_brand
+
+
+def _match_mentions_to_stoplist(mentions: list[dict], stoplist_records: list[BrandRecord]) -> list[dict]:
+    stoplist_keys = _stoplist_key_to_brand(stoplist_records)
+    matches = []
+    for item in mentions:
+        matched_names = sorted({stoplist_keys[key] for key in _brand_item_keys(item) if key in stoplist_keys}, key=str.lower)
+        if not matched_names:
+            continue
+        matched = dict(item)
+        matched["stoplist_brands"] = matched_names
+        matches.append(matched)
+    return matches
+
+
 def _has_materials(result_dir: Path) -> bool:
     return (
         (result_dir / "OCR_Log.json").is_file()
@@ -445,5 +480,61 @@ def evaluate_asian_brands(result_dir: str | Path) -> dict:
         + "; ".join(f"{item['brand']} - {item.get('duration_sec', 0)} сек." for item in brand_mentions)
         + ".",
         "message_html": "Обнаружены азиатские бренды: " + _format_secondary_html(brand_mentions) + ".",
+        **common,
+    }
+
+
+def evaluate_secondary_advertiser_stoplist(result_dir: str | Path) -> dict:
+    stoplist_records = load_stoplist_brand_database()
+    if not stoplist_records:
+        return {
+            "status": "pending",
+            "message": f"Стоп-лист брендов не найден во вкладке {STOPLIST_BRANDS_SHEET}: {BRAND_DATABASE_PATH}",
+            "brand_database_path": str(BRAND_DATABASE_PATH),
+            "brand_database_sheet": STOPLIST_BRANDS_SHEET,
+            "brand_database_count": 0,
+        }
+
+    secondary_result = evaluate_secondary_advertisers(result_dir)
+    secondary = secondary_result.get("secondary_advertisers") or []
+    common = {
+        "brand_database_path": str(BRAND_DATABASE_PATH),
+        "brand_database_sheet": STOPLIST_BRANDS_SHEET,
+        "brand_database_count": len(stoplist_records),
+        "secondary_advertisers": secondary,
+        "secondary_advertiser_result": secondary_result,
+    }
+
+    if not secondary:
+        if secondary_result.get("status") in {"pending", "warning"}:
+            return {
+                "status": secondary_result.get("status", "pending"),
+                "message": "Стоп-лист второстепенных рекламодателей не проверен: "
+                + secondary_result.get("message", "второстепенные рекламодатели не определены."),
+                **common,
+            }
+        return {
+            "status": "pass",
+            "message": "Второстепенные рекламодатели не обнаружены; стоп-лист не применим.",
+            **common,
+        }
+
+    matches = _match_mentions_to_stoplist(secondary, stoplist_records)
+    if matches:
+        return {
+            "status": "fail",
+            "message": "Второстепенный рекламодатель входит в стоп-лист: "
+            + "; ".join(item["brand"] for item in matches)
+            + ".",
+            "message_html": "Второстепенный рекламодатель входит в стоп-лист: " + _format_secondary_html(matches) + ".",
+            "stoplist_matches": matches,
+            **common,
+        }
+
+    return {
+        "status": "pass",
+        "message": "Второстепенные рекламодатели не входят в стоп-лист: "
+        + "; ".join(item["brand"] for item in secondary)
+        + ".",
         **common,
     }
