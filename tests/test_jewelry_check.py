@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -70,6 +71,22 @@ def make_result_dir(ocr_log: dict | None = None):
 
 
 class JewelryCheckTests(unittest.TestCase):
+    def setUp(self):
+        self.cv_patcher = patch(
+            "app.jewelry_check.analyze_jewelry_mentions_from_cv",
+            return_value={
+                "cv_enabled": False,
+                "cv_model_path": "",
+                "cv_error": "YOLO test disabled",
+                "cv_detections": [],
+                "cv_jewelry_mentions": [],
+            },
+        )
+        self.cv_patcher.start()
+
+    def tearDown(self):
+        self.cv_patcher.stop()
+
     def test_evaluate_jewelry_presence_passes_when_keyword_found(self):
         tmp, base = make_result_dir(make_ocr_log(["gold ring jewelry"]))
         try:
@@ -107,6 +124,25 @@ class JewelryCheckTests(unittest.TestCase):
         item = evaluated["blocks"][0]["items"][0]
         self.assertEqual(item["status"], "pass")
         self.assertIn(JEWELRY_FOUND_MESSAGE, item["message"])
+
+    def test_evaluate_jewelry_presence_passes_when_cv_finds_jewelry(self):
+        tmp, base = make_result_dir(make_ocr_log(["new collection"]))
+        fake_cv = {
+            "cv_enabled": True,
+            "cv_model_path": "model.pt",
+            "cv_error": "",
+            "cv_detections": [{"label": "ring", "raw_label": "ring", "confidence": 0.91, "frame": "frame_001.jpg", "second": "1сек."}],
+            "cv_jewelry_mentions": [{"label": "ring", "raw_label": "ring", "confidence": 0.91, "frame": "frame_001.jpg", "second": "1сек."}],
+        }
+        try:
+            with patch("app.jewelry_check.analyze_jewelry_mentions_from_cv", return_value=fake_cv):
+                result = evaluate_jewelry_presence(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertIn(JEWELRY_FOUND_MESSAGE, result["message"])
+        self.assertIn("CV: ring", result["message"])
 
     def test_evaluate_jewelry_tags_required_warns_when_jewelry_found(self):
         tmp, base = make_result_dir(make_ocr_log(["gold ring jewelry"]))

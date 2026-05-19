@@ -7,8 +7,12 @@ import re
 from pathlib import Path
 
 try:
+    from black_bars import find_source_frames_dir
+    from cv_detection import detect_cv_objects_in_frames, filter_cv_detections
     from frame_safety import frame_second_label, iter_ocr_lines, load_ocr_log, normalize_text
 except ImportError:
+    from .black_bars import find_source_frames_dir
+    from .cv_detection import detect_cv_objects_in_frames, filter_cv_detections
     from .frame_safety import frame_second_label, iter_ocr_lines, load_ocr_log, normalize_text
 
 
@@ -53,6 +57,23 @@ JEWELRY_KEYWORDS = [
     "bracelet",
     "necklace",
     "pendant",
+]
+JEWELRY_CV_LABELS = [
+    "jewelry",
+    "jewellery",
+    "ring",
+    "earring",
+    "earrings",
+    "bracelet",
+    "necklace",
+    "pendant",
+    "chain",
+    "gold ring",
+    "diamond ring",
+    "diamond",
+    "gemstone",
+    "brooch",
+    "watch",
 ]
 
 
@@ -144,20 +165,52 @@ def _analyze_jewelry_from_result_dir(result_dir: str | Path) -> tuple[dict, bool
     else:
         analysis = analyze_jewelry_mentions_from_text(_read_text(all_text_path))
 
-    has_materials = frames_dir.is_dir() or all_text_path.is_file() or ocr_path.is_file()
+    cv_analysis = analyze_jewelry_mentions_from_cv(base)
+    analysis = {**analysis, **cv_analysis}
+    has_materials = frames_dir.is_dir() or (base / "frames_pdf_original").is_dir() or all_text_path.is_file() or ocr_path.is_file()
     return analysis, has_materials
+
+
+def analyze_jewelry_mentions_from_cv(result_dir: str | Path) -> dict:
+    frames_dir = find_source_frames_dir(result_dir)
+    if frames_dir is None:
+        return {
+            "cv_enabled": False,
+            "cv_model_path": "",
+            "cv_error": "Кадры для CV-проверки не найдены.",
+            "cv_detections": [],
+            "cv_jewelry_mentions": [],
+        }
+    cv_result = detect_cv_objects_in_frames(frames_dir, labels=JEWELRY_CV_LABELS)
+    filtered = filter_cv_detections(cv_result["detections"], JEWELRY_CV_LABELS)
+    return {
+        "cv_enabled": cv_result["enabled"],
+        "cv_model_path": cv_result["model_path"],
+        "cv_error": cv_result["error"],
+        "cv_detections": cv_result["detections"],
+        "cv_jewelry_mentions": filtered,
+    }
 
 
 def evaluate_jewelry_presence(result_dir: str | Path) -> dict:
     analysis, has_materials = _analyze_jewelry_from_result_dir(result_dir)
     mentions = analysis["jewelry_mentions"]
-    if mentions:
+    cv_mentions = analysis.get("cv_jewelry_mentions", [])
+    if mentions or cv_mentions:
         keywords = ", ".join(item["keyword"] for item in mentions[:8])
         seconds = sorted(
             {second for item in mentions for second in item.get("seconds", [])},
             key=lambda value: int(re.search(r"\d+", value).group(0)) if re.search(r"\d+", value) else 0,
         )
-        place = f" Найденные признаки: {keywords}."
+        cv_labels = ", ".join(
+            str(item.get("raw_label") or item.get("label")) for item in cv_mentions[:8]
+        )
+        place_parts = []
+        if keywords:
+            place_parts.append(f"текст: {keywords}")
+        if cv_labels:
+            place_parts.append(f"CV: {cv_labels}")
+        place = f" Найденные признаки: {'; '.join(place_parts)}."
         if seconds:
             place += f" Кадры/секунды: {', '.join(seconds[:10])}."
         return {
@@ -183,7 +236,8 @@ def evaluate_jewelry_presence(result_dir: str | Path) -> dict:
 def evaluate_jewelry_tags_required(result_dir: str | Path) -> dict:
     analysis, has_materials = _analyze_jewelry_from_result_dir(result_dir)
     mentions = analysis["jewelry_mentions"]
-    if mentions:
+    cv_mentions = analysis.get("cv_jewelry_mentions", [])
+    if mentions or cv_mentions:
         return {
             "status": "warning",
             "message": JEWELRY_TAGS_REQUIRED_MESSAGE,

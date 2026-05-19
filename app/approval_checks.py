@@ -27,6 +27,12 @@ try:
         evaluate_weapon_violence_references,
     )
     from state_symbols import evaluate_state_symbols
+    from visual_reference_checks import (
+        evaluate_car_license_plate,
+        evaluate_disease_references,
+        evaluate_doctor_image_references,
+        evaluate_traffic_violation_references,
+    )
 except ImportError:
     from .black_bars import evaluate_black_side_bars
     from .comparative_claims import evaluate_claim_support, evaluate_comparative_claims
@@ -48,6 +54,12 @@ except ImportError:
         evaluate_weapon_violence_references,
     )
     from .state_symbols import evaluate_state_symbols
+    from .visual_reference_checks import (
+        evaluate_car_license_plate,
+        evaluate_disease_references,
+        evaluate_doctor_image_references,
+        evaluate_traffic_violation_references,
+    )
 
 
 def _count_frame_seconds(result_dir: str | Path) -> int | None:
@@ -224,10 +236,14 @@ EVALUATORS = {
     "16": evaluate_comparative_claims,
     "21": evaluate_pharma_effect_claims,
     "22": evaluate_bad_treatment_claims,
+    "23": evaluate_doctor_image_references,
+    "24": evaluate_traffic_violation_references,
+    "25": evaluate_car_license_plate,
     "235": evaluate_claim_support,
     "246": evaluate_distance_sales_disclaimer,
     "247": evaluate_contact_info_disclaimer,
     "249": evaluate_alcohol_references,
+    "250": evaluate_disease_references,
     "252": evaluate_non_russian_words,
     "258": evaluate_non_russian_words_translation,
     "228": evaluate_repeated_frames,
