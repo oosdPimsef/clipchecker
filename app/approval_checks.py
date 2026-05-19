@@ -26,6 +26,7 @@ try:
         evaluate_smoking_references,
         evaluate_weapon_violence_references,
     )
+    from secondary_advertisers import evaluate_secondary_advertisers
     from state_symbols import evaluate_state_symbols
     from visual_reference_checks import (
         evaluate_car_license_plate,
@@ -53,6 +54,7 @@ except ImportError:
         evaluate_smoking_references,
         evaluate_weapon_violence_references,
     )
+    from .secondary_advertisers import evaluate_secondary_advertisers
     from .state_symbols import evaluate_state_symbols
     from .visual_reference_checks import (
         evaluate_car_license_plate,
@@ -239,6 +241,7 @@ EVALUATORS = {
     "23": evaluate_doctor_image_references,
     "24": evaluate_traffic_violation_references,
     "25": evaluate_car_license_plate,
+    "220": evaluate_secondary_advertisers,
     "235": evaluate_claim_support,
     "246": evaluate_distance_sales_disclaimer,
     "247": evaluate_contact_info_disclaimer,
