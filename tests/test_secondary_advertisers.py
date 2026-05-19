@@ -12,7 +12,9 @@ from PIL import Image
 from app.approval_checks import evaluate_approval_view_model
 from app.secondary_advertisers import (
     BRAND_BEARING_CV_LABELS,
+    evaluate_asian_brands,
     evaluate_secondary_advertisers,
+    load_asian_brand_database,
     load_secondary_brand_database,
 )
 
@@ -50,12 +52,16 @@ def make_ocr_log(frame_lines: dict[str, list[str]]) -> dict:
     return data
 
 
-def make_brand_database(path: Path, brands: list[str]) -> None:
+def make_brand_database(path: Path, brands: list[str], asia_brands: list[str] | None = None) -> None:
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.title = "Brands"
     for row, brand in enumerate(brands, start=1):
         worksheet.cell(row=row, column=1, value=brand)
+    if asia_brands is not None:
+        asia = workbook.create_sheet("Asia")
+        for row, brand in enumerate(asia_brands, start=1):
+            asia.cell(row=row, column=1, value=brand)
     workbook.save(path)
 
 
@@ -78,7 +84,11 @@ class SecondaryAdvertisersTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.brand_path = Path(self.tmp.name) / "brands.xlsx"
-        make_brand_database(self.brand_path, ["Основной бренд", "PepsiCo", "X5 RETAIL GROUP", "АВТОВАЗ (LADA)"])
+        make_brand_database(
+            self.brand_path,
+            ["Основной бренд", "PepsiCo", "X5 RETAIL GROUP", "АВТОВАЗ (LADA)"],
+            ["XIAOMI", "Дахуа", "70mai"],
+        )
         self.brand_patch = patch("app.secondary_advertisers.BRAND_DATABASE_PATH", self.brand_path)
         self.cv_patch = patch(
             "app.secondary_advertisers.analyze_secondary_advertisers_from_cv",
@@ -114,6 +124,18 @@ class SecondaryAdvertisersTests(unittest.TestCase):
         records = load_secondary_brand_database(strict_path)
 
         self.assertEqual(records, [])
+
+    def test_asian_brand_database_is_read_strictly_from_asia_sheet(self):
+        records = load_asian_brand_database(self.brand_path)
+        self.assertEqual([record.name for record in records], ["XIAOMI", "Дахуа", "70mai"])
+
+        workbook = Workbook()
+        workbook.active.title = "Brands"
+        workbook.active["A1"] = "XIAOMI"
+        no_asia_path = Path(self.tmp.name) / "no_asia.xlsx"
+        workbook.save(no_asia_path)
+
+        self.assertEqual(load_asian_brand_database(no_asia_path), [])
 
     def test_passes_when_only_primary_advertiser_is_found(self):
         tmp, base = make_result_dir(
@@ -215,6 +237,70 @@ class SecondaryAdvertisersTests(unittest.TestCase):
         item = evaluated["blocks"][0]["items"][0]
         self.assertEqual(item["status"], "fail")
         self.assertIn("X5 RETAIL GROUP", item["message"])
+
+    def test_asian_brands_warns_and_formats_brand_names(self):
+        tmp, base = make_result_dir(make_ocr_log({"frame_001.jpg": ["XIAOMI"], "frame_002.jpg": ["Дахуа"]}))
+        try:
+            result = evaluate_asian_brands(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "warning")
+        self.assertIn("XIAOMI", result["message"])
+        self.assertIn("Дахуа", result["message"])
+        self.assertIn('style="color:#dc2626;font-weight:800"', result["message_html"])
+
+    def test_asian_brands_passes_when_not_found(self):
+        tmp, base = make_result_dir(make_ocr_log({"frame_001.jpg": ["Основной бренд"]}))
+        try:
+            result = evaluate_asian_brands(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["message"], "Азиатских брендов не обнаружено")
+
+    def test_asian_brand_cv_detection_warns_without_ocr(self):
+        tmp, base = make_result_dir(make_ocr_log({"frame_001.jpg": ["нейтральный текст"]}))
+        fake_cv = {
+            "cv_enabled": True,
+            "cv_model_path": "model.pt",
+            "cv_error": "",
+            "cv_brand_mentions": [
+                {
+                    "brand": "XIAOMI",
+                    "seconds": ["1сек."],
+                    "frames": ["frame_001.jpg"],
+                    "sources": ["cv"],
+                    "cv_labels": ["XIAOMI"],
+                    "duration_sec": 1,
+                }
+            ],
+            "cv_brand_bearing_objects": [],
+        }
+        try:
+            with patch("app.secondary_advertisers.analyze_secondary_advertisers_from_cv", return_value=fake_cv):
+                result = evaluate_asian_brands(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "warning")
+        self.assertIn("XIAOMI", result["message"])
+
+    def test_evaluates_item_id_272_inside_view_model(self):
+        tmp, base = make_result_dir(make_ocr_log({"frame_001.jpg": ["70mai"]}))
+        view_model = {
+            "ok": True,
+            "blocks": [{"name": "Видеоряд", "items": [{"id": "272", "number": "272", "text": "asia"}]}],
+        }
+        try:
+            evaluated = evaluate_approval_view_model(view_model, base)
+        finally:
+            tmp.cleanup()
+
+        item = evaluated["blocks"][0]["items"][0]
+        self.assertEqual(item["status"], "warning")
+        self.assertIn("70mai", item["message"])
 
     def test_cv_generic_labels_include_packaging_and_labels(self):
         normalized = {label.lower() for label in BRAND_BEARING_CV_LABELS}

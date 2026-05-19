@@ -27,6 +27,8 @@ BRAND_DATABASE_PATH = Path(
 )
 BRAND_DATABASE_DIR = BRAND_DATABASE_PATH.parent
 BRAND_DATABASE_FILENAME = BRAND_DATABASE_PATH.name
+SECONDARY_BRANDS_SHEET = "Brands"
+ASIAN_BRANDS_SHEET = "Asia"
 
 BRAND_BEARING_CV_LABELS = [
     "brand logo",
@@ -93,15 +95,15 @@ def _split_variants(name: str) -> list[str]:
     return output
 
 
-def load_secondary_brand_database(path: str | Path | None = None) -> list[BrandRecord]:
+def load_brand_database_sheet(path: str | Path | None, sheet_name: str) -> list[BrandRecord]:
     workbook_path = Path(path) if path is not None else BRAND_DATABASE_PATH
     if not workbook_path.is_file():
         return []
     workbook = load_workbook(workbook_path, read_only=True, data_only=True)
     try:
-        if "Brands" not in workbook.sheetnames:
+        if sheet_name not in workbook.sheetnames:
             return []
-        worksheet = workbook["Brands"]
+        worksheet = workbook[sheet_name]
         records = []
         seen = set()
         for row in worksheet.iter_rows(values_only=True):
@@ -119,6 +121,14 @@ def load_secondary_brand_database(path: str | Path | None = None) -> list[BrandR
         return records
     finally:
         workbook.close()
+
+
+def load_secondary_brand_database(path: str | Path | None = None) -> list[BrandRecord]:
+    return load_brand_database_sheet(path, SECONDARY_BRANDS_SHEET)
+
+
+def load_asian_brand_database(path: str | Path | None = None) -> list[BrandRecord]:
+    return load_brand_database_sheet(path, ASIAN_BRANDS_SHEET)
 
 
 def _compile_brand_patterns(records: list[BrandRecord]) -> list[tuple[BrandRecord, str, re.Pattern]]:
@@ -389,5 +399,51 @@ def evaluate_secondary_advertisers(result_dir: str | Path) -> dict:
         + ".",
         "message_html": "Обнаружены второстепенные рекламодатели: " + _format_secondary_html(secondary) + ".",
         "secondary_advertisers": secondary,
+        **common,
+    }
+
+
+def evaluate_asian_brands(result_dir: str | Path) -> dict:
+    base = Path(result_dir)
+    records = load_asian_brand_database()
+    if not records:
+        return {
+            "status": "pending",
+            "message": f"Список азиатских брендов не найден во вкладке {ASIAN_BRANDS_SHEET}: {BRAND_DATABASE_PATH}",
+            "brand_database_path": str(BRAND_DATABASE_PATH),
+            "brand_database_sheet": ASIAN_BRANDS_SHEET,
+            "brand_database_count": 0,
+        }
+
+    ocr_analysis = analyze_brands_from_ocr(base, records)
+    cv_analysis = analyze_secondary_advertisers_from_cv(base, records)
+    brand_mentions = _merge_brand_mentions(ocr_analysis["brand_mentions"], cv_analysis["cv_brand_mentions"])
+    common = {
+        "brand_database_path": str(BRAND_DATABASE_PATH),
+        "brand_database_sheet": ASIAN_BRANDS_SHEET,
+        "brand_database_count": len(records),
+        "asian_brand_mentions": brand_mentions,
+        **cv_analysis,
+    }
+
+    if not brand_mentions:
+        if not _has_materials(base):
+            return {
+                "status": "pending",
+                "message": "Проверка азиатских брендов будет выполнена после извлечения кадров, OCR и CV-анализа.",
+                **common,
+            }
+        return {
+            "status": "pass",
+            "message": "Азиатских брендов не обнаружено",
+            **common,
+        }
+
+    return {
+        "status": "warning",
+        "message": "Обнаружены азиатские бренды: "
+        + "; ".join(f"{item['brand']} - {item.get('duration_sec', 0)} сек." for item in brand_mentions)
+        + ".",
+        "message_html": "Обнаружены азиатские бренды: " + _format_secondary_html(brand_mentions) + ".",
         **common,
     }
