@@ -3423,26 +3423,22 @@ if __name__ == "__main__":
         _write_json(os.path.join(result_dir, "YandexGPT_Connectivity_Log.json"), {"ok": False, "disabled": True})
         print(f"⏭ {msg}")
 
-    # 2.2) OpenAI/ChatGPT временно отключён, чтобы не тратить токены и ускорить Python-проверки.
-    # Для включения обратно задайте ENABLE_OPENAI=1.
-    if os.getenv("ENABLE_OPENAI", "").strip().lower() in {"1", "true", "yes", "on"}:
-        run_openai_connectivity_test_safe(result_dir)
-        write_openai_tokens_status(result_dir)
-        run_openai_materials_review_safe(result_dir)
-    else:
-        msg = "OpenAI/ChatGPT временно отключён. Для включения задайте ENABLE_OPENAI=1."
+    # 2.2) OpenAI/ChatGPT: connectivity, usage status and materials review.
+    if os.getenv("DISABLE_OPENAI", "").strip().lower() in {"1", "true", "yes", "on"}:
+        msg = "OpenAI/ChatGPT отключён через DISABLE_OPENAI=1."
         _write_text(os.path.join(result_dir, "Comprehensive_Legal_Review_OpenAI.txt"), msg)
         _write_text(os.path.join(result_dir, "OpenAI_Connectivity_Test.txt"), msg)
         _write_json(os.path.join(result_dir, "OpenAI_Connectivity_Log.json"), {"ok": False, "disabled": True})
         _write_json(os.path.join(result_dir, "OpenAI_Tokens_Status.json"), {"ok": False, "disabled": True})
         _write_json(
             os.path.join(result_dir, "OpenAI_Materials_Log.json"),
-            {"ok": False, "disabled": True, "reason": "ENABLE_OPENAI is not set"},
+            {"ok": False, "disabled": True, "reason": "DISABLE_OPENAI is set"},
         )
-        # run_openai_connectivity_test_safe(result_dir)
-        # write_openai_tokens_status(result_dir)
-        # run_openai_materials_review_safe(result_dir)
         print(f"⏭ {msg}")
+    else:
+        run_openai_connectivity_test_safe(result_dir)
+        write_openai_tokens_status(result_dir)
+        run_openai_materials_review_safe(result_dir)
 
     print("✅ Последовательный анализ завершён.")
 
