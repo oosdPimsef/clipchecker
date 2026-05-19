@@ -99,7 +99,9 @@ def load_secondary_brand_database(path: str | Path | None = None) -> list[BrandR
         return []
     workbook = load_workbook(workbook_path, read_only=True, data_only=True)
     try:
-        worksheet = workbook["Brands"] if "Brands" in workbook.sheetnames else workbook.worksheets[0]
+        if "Brands" not in workbook.sheetnames:
+            return []
+        worksheet = workbook["Brands"]
         records = []
         seen = set()
         for row in worksheet.iter_rows(values_only=True):

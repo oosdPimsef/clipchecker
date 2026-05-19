@@ -104,6 +104,17 @@ class SecondaryAdvertisersTests(unittest.TestCase):
         self.assertIn("LADA", lada.variants)
         self.assertIn("АВТОВАЗ", lada.variants)
 
+    def test_brand_database_is_read_strictly_from_brands_sheet(self):
+        workbook = Workbook()
+        workbook.active.title = "Other"
+        workbook.active["A1"] = "PepsiCo"
+        strict_path = Path(self.tmp.name) / "strict_brands.xlsx"
+        workbook.save(strict_path)
+
+        records = load_secondary_brand_database(strict_path)
+
+        self.assertEqual(records, [])
+
     def test_passes_when_only_primary_advertiser_is_found(self):
         tmp, base = make_result_dir(
             make_ocr_log({"frame_001.jpg": ["Основной бренд"], "frame_002.jpg": ["Основной бренд"]}),
