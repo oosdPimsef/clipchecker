@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from openpyxl import load_workbook
+from PIL import Image, ImageStat
 
 try:
     from black_bars import find_source_frames_dir
@@ -362,6 +363,74 @@ def _match_mentions_to_stoplist(mentions: list[dict], stoplist_records: list[Bra
     return matches
 
 
+def _iter_frame_files(frames_dir: Path) -> list[Path]:
+    if not frames_dir.is_dir():
+        return []
+    return sorted(
+        [
+            path
+            for path in frames_dir.iterdir()
+            if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+        ],
+        key=lambda path: frame_second_label(path.name),
+    )
+
+
+def _frame_lookup(result_dir: str | Path) -> dict[str, Path]:
+    frames_dir = find_source_frames_dir(result_dir)
+    if frames_dir is None:
+        return {}
+    return {path.name: path for path in _iter_frame_files(frames_dir)}
+
+
+def _style_vector(path: Path) -> list[float] | None:
+    try:
+        with Image.open(path) as img:
+            rgb = img.convert("RGB").resize((64, 64))
+            stat = ImageStat.Stat(rgb)
+            means = [value / 255.0 for value in stat.mean]
+            stddev = [value / 128.0 for value in stat.stddev]
+            histogram = rgb.histogram()
+    except OSError:
+        return None
+
+    features: list[float] = []
+    for channel in range(3):
+        start = channel * 256
+        channel_hist = histogram[start : start + 256]
+        total = float(sum(channel_hist)) or 1.0
+        for bin_start in range(0, 256, 32):
+            features.append(sum(channel_hist[bin_start : bin_start + 32]) / total)
+    features.extend(means)
+    features.extend(stddev)
+    return features
+
+
+def _mean_vector(vectors: list[list[float]]) -> list[float] | None:
+    if not vectors:
+        return None
+    return [sum(vector[idx] for vector in vectors) / len(vectors) for idx in range(len(vectors[0]))]
+
+
+def _style_distance(left: list[float], right: list[float]) -> float:
+    if not left or not right or len(left) != len(right):
+        return 1.0
+    return sum(abs(a - b) for a, b in zip(left, right)) / len(left)
+
+
+def _format_style_issues_html(issues: list[dict]) -> str:
+    parts = []
+    for issue in issues:
+        brand = _format_brand_html(issue["brand"], "#dc2626")
+        frames = ", ".join(html.escape(frame) for frame in issue.get("frames", [])[:8])
+        score = issue.get("max_distance", 0)
+        suffix = f" - отличие стиля {score:.2f}"
+        if frames:
+            suffix += f" ({frames})"
+        parts.append(f"{brand}{suffix}")
+    return "; ".join(parts)
+
+
 def _has_materials(result_dir: Path) -> bool:
     return (
         (result_dir / "OCR_Log.json").is_file()
@@ -536,5 +605,114 @@ def evaluate_secondary_advertiser_stoplist(result_dir: str | Path) -> dict:
         "message": "Второстепенные рекламодатели не входят в стоп-лист: "
         + "; ".join(item["brand"] for item in secondary)
         + ".",
+        **common,
+    }
+
+
+def evaluate_secondary_advertiser_style(result_dir: str | Path) -> dict:
+    secondary_result = evaluate_secondary_advertisers(result_dir)
+    secondary = secondary_result.get("secondary_advertisers") or []
+    common = {
+        "secondary_advertiser_result": secondary_result,
+        "primary_advertiser": secondary_result.get("primary_advertiser"),
+        "secondary_advertisers": secondary,
+        "style_distance_threshold": 0.23,
+    }
+
+    if not secondary:
+        if secondary_result.get("status") in {"pending", "warning"}:
+            return {
+                "status": secondary_result.get("status", "pending"),
+                "message": "Стилистика ролика не проверена: "
+                + secondary_result.get("message", "второстепенные рекламодатели не определены."),
+                **common,
+            }
+        return {
+            "status": "pass",
+            "message": "В ролике не обнаружено больше одного рекламодателя; проверка стилистики не применима.",
+            **common,
+        }
+
+    primary = secondary_result.get("primary_advertiser")
+    video_mentions = secondary_result.get("video_brand_mentions") or []
+    primary_mentions = [item for item in video_mentions if item.get("brand") == primary]
+    primary_frames = sorted({frame for item in primary_mentions for frame in item.get("frames", []) if frame})
+    secondary_frames = sorted({frame for item in secondary for frame in item.get("frames", []) if frame})
+
+    lookup = _frame_lookup(result_dir)
+    if not lookup:
+        return {
+            "status": "pending",
+            "message": "Кадры для проверки стилистики не найдены.",
+            **common,
+        }
+    if not primary_frames:
+        secondary_frame_set = set(secondary_frames)
+        primary_frames = [name for name in lookup if name not in secondary_frame_set]
+    if not primary_frames:
+        return {
+            "status": "pending",
+            "message": "Недостаточно кадров основного рекламодателя для сравнения стилистики.",
+            **common,
+        }
+
+    primary_vectors = [_style_vector(lookup[frame]) for frame in primary_frames if frame in lookup]
+    primary_vectors = [vector for vector in primary_vectors if vector is not None]
+    primary_profile = _mean_vector(primary_vectors)
+    if primary_profile is None:
+        return {
+            "status": "pending",
+            "message": "Не удалось рассчитать визуальный профиль кадров основного рекламодателя.",
+            **common,
+        }
+
+    threshold = common["style_distance_threshold"]
+    issues = []
+    brand_style_results = []
+    for item in secondary:
+        frame_distances = []
+        for frame in item.get("frames", []):
+            path = lookup.get(frame)
+            vector = _style_vector(path) if path is not None else None
+            if vector is None:
+                continue
+            frame_distances.append({"frame": frame, "distance": _style_distance(primary_profile, vector)})
+        if not frame_distances:
+            continue
+        max_distance = max(value["distance"] for value in frame_distances)
+        avg_distance = sum(value["distance"] for value in frame_distances) / len(frame_distances)
+        result = {
+            "brand": item["brand"],
+            "frames": [value["frame"] for value in frame_distances],
+            "max_distance": round(max_distance, 3),
+            "avg_distance": round(avg_distance, 3),
+        }
+        brand_style_results.append(result)
+        if max_distance > threshold:
+            issues.append(result)
+
+    common["style_results"] = brand_style_results
+    if not brand_style_results:
+        return {
+            "status": "pending",
+            "message": "Недостаточно кадров второстепенных рекламодателей для сравнения стилистики.",
+            **common,
+        }
+
+    if issues:
+        return {
+            "status": "fail",
+            "message": "Кадры со второстепенными рекламодателями заметно отличаются от стилистики основного рекламодателя: "
+            + "; ".join(f"{item['brand']} - отличие стиля {item['max_distance']:.2f}" for item in issues)
+            + ".",
+            "message_html": "Кадры со второстепенными рекламодателями заметно отличаются от стилистики основного рекламодателя: "
+            + _format_style_issues_html(issues)
+            + ".",
+            **common,
+        }
+
+    return {
+        "status": "pass",
+        "message": "Кадры со второстепенными рекламодателями не имеют кардинального отличия от стилистики основного рекламодателя.",
         **common,
     }

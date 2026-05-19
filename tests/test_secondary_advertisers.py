@@ -14,6 +14,7 @@ from app.secondary_advertisers import (
     BRAND_BEARING_CV_LABELS,
     evaluate_asian_brands,
     evaluate_secondary_advertiser_stoplist,
+    evaluate_secondary_advertiser_style,
     evaluate_secondary_advertisers,
     load_asian_brand_database,
     load_secondary_brand_database,
@@ -76,14 +77,19 @@ def make_brand_database(
     workbook.save(path)
 
 
-def make_result_dir(ocr_log: dict | None = None, documents_text: str = ""):
+def make_result_dir(
+    ocr_log: dict | None = None,
+    documents_text: str = "",
+    frame_colors: dict[str, tuple[int, int, int] | str] | None = None,
+):
     tmp = tempfile.TemporaryDirectory()
     base = Path(tmp.name)
     frames = base / "frames"
     frames.mkdir()
     frame_names = list(ocr_log or {"frame_001.jpg": []})
     for frame_name in frame_names:
-        Image.new("RGB", (1000, 500), "white").save(frames / frame_name)
+        color = (frame_colors or {}).get(frame_name, "white")
+        Image.new("RGB", (1000, 500), color).save(frames / frame_name)
     if ocr_log is not None:
         (base / "OCR_Log.json").write_text(json.dumps(ocr_log, ensure_ascii=False), encoding="utf-8")
     if documents_text:
@@ -319,6 +325,54 @@ class SecondaryAdvertisersTests(unittest.TestCase):
         item = evaluated["blocks"][0]["items"][0]
         self.assertEqual(item["status"], "fail")
         self.assertIn("PepsiCo", item["message"])
+
+    def test_secondary_advertiser_style_passes_when_frames_are_similar(self):
+        tmp, base = make_result_dir(
+            make_ocr_log({"frame_001.jpg": ["Основной бренд"], "frame_002.jpg": ["X5 RETAIL GROUP"]}),
+            documents_text="Основной бренд",
+            frame_colors={"frame_001.jpg": (245, 245, 245), "frame_002.jpg": (235, 235, 235)},
+        )
+        try:
+            result = evaluate_secondary_advertiser_style(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertIn("не имеют кардинального отличия", result["message"])
+
+    def test_secondary_advertiser_style_fails_when_frames_change_style(self):
+        tmp, base = make_result_dir(
+            make_ocr_log({"frame_001.jpg": ["Основной бренд"], "frame_002.jpg": ["X5 RETAIL GROUP"]}),
+            documents_text="Основной бренд",
+            frame_colors={"frame_001.jpg": (255, 255, 255), "frame_002.jpg": (0, 0, 0)},
+        )
+        try:
+            result = evaluate_secondary_advertiser_style(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("X5 RETAIL GROUP", result["message"])
+        self.assertIn('style="color:#dc2626;font-weight:800"', result["message_html"])
+
+    def test_evaluates_item_id_225_inside_view_model(self):
+        tmp, base = make_result_dir(
+            make_ocr_log({"frame_001.jpg": ["Основной бренд"], "frame_002.jpg": ["X5 RETAIL GROUP"]}),
+            documents_text="Основной бренд",
+            frame_colors={"frame_001.jpg": (255, 255, 255), "frame_002.jpg": (0, 0, 0)},
+        )
+        view_model = {
+            "ok": True,
+            "blocks": [{"name": "Видеоряд", "items": [{"id": "225", "number": "225", "text": "style"}]}],
+        }
+        try:
+            evaluated = evaluate_approval_view_model(view_model, base)
+        finally:
+            tmp.cleanup()
+
+        item = evaluated["blocks"][0]["items"][0]
+        self.assertEqual(item["status"], "fail")
+        self.assertIn("X5 RETAIL GROUP", item["message"])
 
     def test_asian_brands_warns_and_formats_brand_names(self):
         tmp, base = make_result_dir(make_ocr_log({"frame_001.jpg": ["XIAOMI"], "frame_002.jpg": ["Дахуа"]}))
