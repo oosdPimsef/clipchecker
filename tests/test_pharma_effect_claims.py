@@ -9,9 +9,13 @@ from PIL import Image
 
 from app.approval_checks import evaluate_approval_view_model
 from app.pharma_effect_claims import (
+    BAD_TREATMENT_TERMS,
+    NO_BAD_TREATMENT_CLAIMS_MESSAGE,
     NO_PHARMA_EFFECT_CLAIMS_MESSAGE,
     PHARMA_EFFECT_TERMS,
+    evaluate_bad_treatment_claims,
     evaluate_pharma_effect_claims,
+    extract_bad_treatment_terms,
     extract_pharma_effect_terms,
 )
 
@@ -63,6 +67,7 @@ def make_result_dir(ocr_log: dict):
 class PharmaEffectClaimsTests(unittest.TestCase):
     def test_dictionary_has_at_least_30_terms(self):
         self.assertGreaterEqual(len(PHARMA_EFFECT_TERMS), 30)
+        self.assertGreaterEqual(len(BAD_TREATMENT_TERMS), 55)
 
     def test_extracts_inflected_effect_terms(self):
         terms = extract_pharma_effect_terms("Лечит простуду, спасает от боли и гарантированный результат")
@@ -70,6 +75,13 @@ class PharmaEffectClaimsTests(unittest.TestCase):
         self.assertIn("спасти", terms)
         self.assertIn("гарантировать", terms)
         self.assertIn("результат", terms)
+
+    def test_extracts_bad_treatment_hints(self):
+        terms = extract_bad_treatment_terms("БАД против воспаления, помогает при боли и укрепляет иммунитет")
+        self.assertIn("против болезни", terms)
+        self.assertIn("боль", terms)
+        self.assertIn("иммунитет", terms)
+        self.assertIn("помочь", terms)
 
     def test_passes_when_claims_not_found(self):
         tmp, base = make_result_dir(make_ocr_log({"frame_001.jpg": ["Новая упаковка препарата"]}))
@@ -118,6 +130,52 @@ class PharmaEffectClaimsTests(unittest.TestCase):
         item = evaluated["blocks"][0]["items"][0]
         self.assertEqual(item["status"], "fail")
         self.assertIn("устранить", item["message"])
+
+    def test_id_22_passes_when_bad_treatment_claims_not_found(self):
+        tmp, base = make_result_dir(make_ocr_log({"frame_001.jpg": ["БАД. Источник витаминов"]}))
+        try:
+            result = evaluate_bad_treatment_claims(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["message"], NO_BAD_TREATMENT_CLAIMS_MESSAGE)
+
+    def test_id_22_fails_on_treatment_hints_and_formats_html(self):
+        tmp, base = make_result_dir(
+            make_ocr_log(
+                {
+                    "frame_001.jpg": ["Помогает при воспалении"],
+                    "frame_002.jpg": ["Средство против боли"],
+                }
+            )
+        )
+        try:
+            result = evaluate_bad_treatment_claims(base)
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("воспаление", result["message"])
+        self.assertIn("боль", result["message"])
+        self.assertIn('style="color:#dc2626;font-weight:800"', result["message_html"])
+
+    def test_evaluates_item_id_22_inside_view_model(self):
+        tmp, base = make_result_dir(make_ocr_log({"frame_001.jpg": ["БАД снижает симптомы простуды"]}))
+        view_model = {
+            "ok": True,
+            "blocks": [
+                {"name": "Видеоряд", "items": [{"id": "22", "number": "22", "text": "БАД лечение"}]},
+            ],
+        }
+        try:
+            evaluated = evaluate_approval_view_model(view_model, base)
+        finally:
+            tmp.cleanup()
+
+        item = evaluated["blocks"][0]["items"][0]
+        self.assertEqual(item["status"], "fail")
+        self.assertIn("симптом", item["message"])
 
 
 if __name__ == "__main__":
