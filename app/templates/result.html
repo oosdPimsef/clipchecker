@@ -98,6 +98,13 @@
     .status-dot.red{background:#f85149}
     .status-dot.green{background:#2ea043}
     .log-timer{margin-left:6px;color:var(--muted)}
+    .analysis-progress{display:inline-flex;align-items:center;gap:3px;margin-left:8px;color:var(--muted);font-size:12px;font-weight:600}
+    .analysis-progress .blink-dot{width:5px;height:5px;border-radius:50%;background:#f59e0b;animation:blink 1s infinite ease-in-out}
+    .analysis-progress .blink-dot:nth-child(2){animation-delay:.15s}
+    .analysis-progress .blink-dot:nth-child(3){animation-delay:.3s}
+    .analysis-ready{display:none;margin-left:8px;color:#2ea043;font-size:12px;font-weight:700}
+    .analysis-ready.is-visible{display:inline-flex}
+    @keyframes blink{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-1px)}}
     .live-log-box{border:1px dashed var(--border);border-radius:12px;padding:10px;background:color-mix(in srgb, var(--surface) 94%, black)}
     .live-log-title{font-size:12px;color:var(--muted)}
     .live-log-pre{height:420px;overflow:auto;background:transparent;border:none;margin:6px 0 0;color:#1a7f37}
@@ -160,10 +167,23 @@
     }
 
     .approval-meta{margin:0 0 10px;color:var(--muted);font-size:13px}
-    .approval-block{margin:0 0 14px}
-    .approval-block h3{margin:0 0 8px;font-size:15px;line-height:1.3}
+    .approval-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px;flex-wrap:wrap}
+    .approval-toolbar .approval-meta{margin:0}
+    .approval-filter{display:inline-flex;align-items:center;gap:9px}
+    .approval-filter-dot{width:15px;height:15px;border-radius:50%;border:1px solid color-mix(in srgb, var(--surface) 80%, black);cursor:pointer;padding:0;box-shadow:0 0 0 3px transparent;background:#9ca3af}
+    .approval-filter-dot.green{background:#2ea043;color:#2ea043}
+    .approval-filter-dot.orange{background:#f59e0b;color:#f59e0b}
+    .approval-filter-dot.red{background:#ef4444;color:#ef4444}
+    .approval-filter-dot[aria-pressed="true"]{box-shadow:0 0 0 3px color-mix(in srgb, currentColor 22%, transparent);opacity:1}
+    .approval-filter-dot[aria-pressed="false"]{opacity:.28;filter:grayscale(.45)}
+    .approval-block{margin:0 0 10px}
+    .approval-block > summary{font-size:15px;line-height:1.3}
+    .approval-block > summary::after{content:"";width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);margin-left:auto;transition:transform .16s ease}
+    .approval-block:not([open]) > summary::after{transform:rotate(-45deg)}
+    .approval-block[open] > .approval-list{padding:10px;border-top:1px dashed var(--border)}
     .approval-list{margin:0;padding:0;list-style:none;display:grid;gap:6px}
     .approval-item{display:grid;grid-template-columns:76px 1fr;gap:8px;align-items:start;border:1px solid var(--border);border-radius:10px;padding:8px;background:color-mix(in srgb, var(--surface) 98%, black)}
+    .approval-item.is-filtered-out{display:none}
     .approval-num{font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
     .approval-text{min-width:0}
     .approval-status{display:inline-block;margin-top:4px;color:var(--muted);font-size:12px}
@@ -173,6 +193,8 @@
     .approval-dot.fail{background:#ef4444}
     .approval-dot.warning{background:#f59e0b}
     .approval-dot.pending{background:#9ca3af}
+    .approval-empty-filter{display:none;color:var(--muted);font-size:12px;padding:8px 0}
+    .approval-block.is-empty-by-filter .approval-empty-filter{display:block}
     .foreign-word{color:#dc2626;font-weight:700}
     .price-value{color:#dc2626;font-weight:800;font-size:18px}
     .media-person-name{color:#dc2626;font-weight:800}
@@ -284,6 +306,10 @@
           <span id="log-status-dot" class="status-dot"></span>
           Онлайн‑лог выполнения
           <span class="log-timer"><strong id="log-timer">00:00</strong></span>
+          <span id="analysis-progress" class="analysis-progress" aria-label="Анализ выполняется">
+            <span class="blink-dot"></span><span class="blink-dot"></span><span class="blink-dot"></span>
+          </span>
+          <span id="analysis-ready" class="analysis-ready">анализ готов</span>
         </summary>
         <div class="live-log-box">
           <div class="live-log-title">stream: Clipchecker_materials/clipchecker.log</div>
@@ -295,13 +321,21 @@
       <details open>
         <summary>Карта согласования РМ</summary>
         {% if approval.ok %}
-          <div class="approval-meta">Категория: <strong>{{ approval.selected_category }}</strong></div>
+          <div class="approval-toolbar">
+            <div class="approval-meta">Категория: <strong>{{ approval.selected_category }}</strong></div>
+            <div class="approval-filter" aria-label="Фильтр пунктов карты согласования">
+              <button type="button" class="approval-filter-dot green" data-approval-filter="green" aria-pressed="true" title="Показать/скрыть зелёные пункты"></button>
+              <button type="button" class="approval-filter-dot orange" data-approval-filter="orange" aria-pressed="true" title="Показать/скрыть оранжевые пункты"></button>
+              <button type="button" class="approval-filter-dot red" data-approval-filter="red" aria-pressed="true" title="Показать/скрыть красные пункты"></button>
+            </div>
+          </div>
           {% for block in approval.blocks %}
-            <section class="approval-block">
-              <h3>{{ block.name }}</h3>
+            <details class="approval-block" open>
+              <summary>{{ block.name }}</summary>
               <ol class="approval-list">
                 {% for item in block["items"] %}
-                  <li class="approval-item">
+                  {% set filter_status = "green" if item.status == "pass" else "red" if item.status == "fail" else "orange" %}
+                  <li class="approval-item" data-approval-status="{{ filter_status }}">
                     <span class="approval-num">ID {{ item.id or item.number }}</span>
                     <span class="approval-line">
                       <span class="approval-dot {{ item.status }}" title="{{ item.status }}"></span>
@@ -309,8 +343,9 @@
                     </span>
                   </li>
                 {% endfor %}
+                <li class="approval-empty-filter">В этом блоке нет пунктов с выбранными статусами.</li>
               </ol>
-            </section>
+            </details>
           {% endfor %}
         {% else %}
           <pre>{{ approval.error }}</pre>
@@ -356,10 +391,17 @@
       var K_STARTED='clipchecker_run_start_ms', K_LAST='clipchecker_last_elapsed_text';
       function fmt(ms){ ms=Math.max(0,ms|0);var s=Math.floor(ms/1000),h=Math.floor(s/3600);s-=h*3600;var m=Math.floor(s/60);s-=m*60;function p(x){return(x<10?'0':'')+x}return (h>0?(p(h)+':'):'')+p(m)+':'+p(s); }
       var dot=document.getElementById('log-status-dot'), timer=document.getElementById('log-timer');
+      var progress=document.getElementById('analysis-progress'), ready=document.getElementById('analysis-ready');
       if(dot){ dot.classList.remove('green'); dot.classList.add('red'); }
       if(timer){ timer.textContent='00:00'; }
+      if(progress){ progress.style.display='inline-flex'; }
+      if(ready){ ready.classList.remove('is-visible'); }
       var startMs=parseInt(localStorage.getItem(K_STARTED)||'0',10); if(!startMs){ startMs=Date.now(); localStorage.setItem(K_STARTED,String(startMs)); }
       var intId=setInterval(function(){ if(timer) timer.textContent=fmt(Date.now()-startMs); },1000);
+      function markReady(){
+        if(progress){ progress.style.display='none'; }
+        if(ready){ ready.classList.add('is-visible'); }
+      }
 
       try{
         var out=document.getElementById("live-log-output"), wrap=document.getElementById("live-log-wrap");
@@ -377,6 +419,7 @@
             localStorage.setItem(K_LAST, elapsed);
             localStorage.removeItem(K_STARTED);
             if(dot){ dot.classList.remove('red'); dot.classList.add('green'); }
+            markReady();
             if(wrap){ wrap.removeAttribute('open'); }
             clearInterval(intId);
           }catch(e){}
@@ -393,6 +436,7 @@
                 localStorage.setItem(K_LAST, elapsed);
                 localStorage.removeItem(K_STARTED);
                 if(dot){ dot.classList.remove('red'); dot.classList.add('green'); }
+                markReady();
                 clearInterval(intId);
               }catch(e){}
               reloadResults();
@@ -408,12 +452,46 @@
     (function(){
       var K_LAST='clipchecker_last_elapsed_text';
       var dot=document.getElementById('log-status-dot'), timer=document.getElementById('log-timer');
+      var progress=document.getElementById('analysis-progress'), ready=document.getElementById('analysis-ready');
       if(dot){ dot.classList.remove('red'); dot.classList.add('green'); }
       if(timer){ var saved=localStorage.getItem(K_LAST); timer.textContent = (saved && saved.trim()) ? saved : '—'; }
+      if(progress){ progress.style.display='none'; }
+      if(ready){ ready.classList.add('is-visible'); }
       try{ var wrap=document.getElementById('live-log-wrap'); if(wrap) wrap.removeAttribute('open'); }catch(e){}
     })();
   </script>
   {% endif %}
+
+  <script>
+    // Глобальный фильтр пунктов карты согласования по цвету статуса.
+    (function(){
+      var active = {green:true, orange:true, red:true};
+      var buttons = Array.prototype.slice.call(document.querySelectorAll('[data-approval-filter]'));
+      var items = Array.prototype.slice.call(document.querySelectorAll('.approval-item[data-approval-status]'));
+      if(!buttons.length || !items.length) return;
+
+      function applyFilters(){
+        items.forEach(function(item){
+          var status = item.getAttribute('data-approval-status') || 'orange';
+          item.classList.toggle('is-filtered-out', !active[status]);
+        });
+        Array.prototype.slice.call(document.querySelectorAll('.approval-block')).forEach(function(block){
+          var visible = block.querySelector('.approval-item:not(.is-filtered-out)');
+          block.classList.toggle('is-empty-by-filter', !visible);
+        });
+      }
+
+      buttons.forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var status = btn.getAttribute('data-approval-filter');
+          active[status] = !active[status];
+          btn.setAttribute('aria-pressed', active[status] ? 'true' : 'false');
+          applyFilters();
+        });
+      });
+      applyFilters();
+    })();
+  </script>
 
   <!-- ЧАТ: логика -->
   <script>
